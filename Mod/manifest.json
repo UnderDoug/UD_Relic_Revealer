@@ -1,0 +1,9 @@
+{
+    "id": "UD_Relic_Revealer",
+    "title": "Relic Revealer",
+    "description": "Adds a popup post-worldgen with a list of the sultan relics generated for the world with the ability to inspect them, and a wish to bring up the popup at any time.",
+    "version": "0.0.1",
+    "author": "{{K-g-G-Y-G-g-K alternation|UnderDoug}}",
+    "tags": "Quality of Life,Cheat",
+    "PreviewImage": "preview.png"
+}

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 
@@ -18,101 +19,224 @@ using XRL.World.Parts;
 namespace UD_Relic_Revealer.Mod
 {
     [HasGameBasedStaticCache]
-    [HasWishCommand]
     public static class Utils
     {
-        public static IRenderable NoRelicsIcon = new Renderable(
-            Tile: "Abilities/abil_berate.bmp",
-            ColorString: $"&K",
-            TileColor: $"&K",
-            DetailColor: 'R');
+        public const string MOD_ID = "UD_Relic_Revealer";
 
-        [GameBasedStaticCache(CreateInstance = false)]
-        public static IEnumerable<RelicRecord> _CachedRelicRecords;
-        public static IEnumerable<RelicRecord> CachedRelicRecords => _CachedRelicRecords ??= GetOrderedRelics();
+        public static ModInfo ThisMod => ModManager.GetMod(MOD_ID);
 
-        public static IEnumerable<RelicRecord> GetOrderedRelics()
+        public static XRL.Version ModVersion => ThisMod.Manifest.Version;
+        public static string ModTitle => ThisMod.Manifest.Title;
+        public static string Author => ThisMod.Manifest.Author;
+        public static string AuthorOnPlatforms => $"{Author} on GitHub (UnderDoug), on Discord (.underdoug), or on the Steam Workshop (UnderDoug)";
+
+        #region Pseudo-Debug
+
+        public static HashSet<string> SingleTimeLogMessages = new();
+        public static Dictionary<ModInfo, HashSet<string>> SingleTimeErrorMessages = new();
+        public static Dictionary<ModInfo, HashSet<string>> SingleTimeWarnMessages = new();
+
+        public static void Error(ModInfo ModInfo, object Message)
+            => (ModInfo ?? ThisMod).Error(Message)
+            ;
+
+        public static void Error(object Message)
+            => Error(ModInfo: null, Message)
+            ;
+
+        public static void Error(ModInfo ModInfo, object Context, Exception X)
+            => Error(ModInfo, $"{Context}: {X}")
+            ;
+
+        public static void Error(object Context, Exception X)
+            => Error(ModInfo: null, Context, X)
+            ;
+
+        public static void ErrorOnce(ModInfo ModInfo, object Message)
         {
-            using var relics = ScopeDisposedList<RelicRecord>.GetFromPool();
-            foreach (var cachedObject in (The.ZoneManager?.CachedObjects?.Values).IteratorSafe())
-            {
-                if (!cachedObject.HasStringProperty("RelicName"))
-                    continue;
+            ModInfo ??= ThisMod;
+            SingleTimeErrorMessages ??= new();
+            if (!SingleTimeErrorMessages.ContainsKey(ModInfo))
+                SingleTimeErrorMessages[ModInfo] = new();
 
-                if (!cachedObject.TryGetPart(out TakenAchievement takenAch)
-                    || takenAch.AchievementID != Achievement.RECOVER_RELIC?.ID)
-                    continue;
-
-                relics.Add(new RelicRecord(cachedObject));
-            }
-
-            relics.StableSortInPlace(delegate (RelicRecord x, RelicRecord y)
-            {
-                if (x == null
-                    || y == null)
-                    return (x == null).CompareTo(y == null);
-
-                if (x.Tier.CompareTo(y.Tier) is int tierComp
-                    && tierComp != 0)
-                    return tierComp;
-
-                return (x?.DisplayName?.Strip()).CompareTo(y?.DisplayName?.Strip());
-            });
-
-            foreach (var relic in relics.IteratorSafe())
-                yield return relic;
+            string message = Message.ToString();
+            if (SingleTimeErrorMessages[ModInfo].Add(message))
+                ModInfo.Error(message);
         }
 
-        [WishCommand(Command = "UD revealrelics")]
-        public static bool RelicReveal_WishHandler()
+        public static void ErrorOnce(object Message)
+            => ErrorOnce(ModInfo: null, Message)
+            ;
+
+        public static void ErrorOnce(ModInfo ModInfo, object Context, Exception X)
         {
-            if (GetOrderedRelics() is not IEnumerable<RelicRecord> relicRecords
-                || relicRecords.IsNullOrEmpty())
-            {
-                Popup.NewPopupMessageAsync(
-                    message: "There don't appear to be any relics.",
-                    buttons: PopupMessage.SingleButton,
-                    contextTitle: "No Relics",
-                    contextRender: NoRelicsIcon
-                ).Wait();
-                return true;
-            }
+            ModInfo ??= ThisMod;
+            SingleTimeErrorMessages ??= new();
+            if (!SingleTimeErrorMessages.ContainsKey(ModInfo))
+                SingleTimeErrorMessages[ModInfo] = new();
 
-            using var relics = ScopeDisposedList<RelicRecord>.GetFromPoolFilledWith(relicRecords);
-            using var relicOptions = ScopeDisposedList<string>.GetFromPoolFilledWith(relics.Select(r => $"[Tier {r?.Tier ?? 0}] {r?.DisplayName ?? "MISSING_RECORD"}"));
-            using var relicRenders = ScopeDisposedList<IRenderable>.GetFromPoolFilledWith(relics.Select(r => r.Render));
-            using var relicHotkeys = ScopeDisposedList<char>.GetFromPool();
-            foreach (var relic in relics)
-                relicHotkeys.Add(relicHotkeys.GetNextHotKey());
-
-            var icon = GameObjectFactory.Factory?.GetBlueprintIfExists("Telescopic Monocle")?.GetRenderable();
-            try
-            {
-                int result = -1;
-                do
-                {
-                    result = Popup.PickOption(
-                        Title: "{{W|Relics, Revealed!}}",
-                        Intro: "Below are the relics that generated for this world.\n\nSelect one to view it as though looking at it.\n\xff",
-                        Options: relicOptions,
-                        Hotkeys: relicHotkeys,
-                        Icons: relicRenders,
-                        IntroIcon: icon,
-                        AllowEscape: true,
-                        PopupID: nameof(RelicReveal_WishHandler));
-
-                    if (result >= 0)
-                        relics[result].ViewRelic();
-                }
-                while (result >= 0);
-            }
-            catch (Exception x)
-            {
-                ModManager.GetMod().Error($"{nameof(RelicReveal_WishHandler)} failed to get cached relics: {x}");
-                return false;
-            }
-
-            return true;
+            string message = Context.ToString();
+            if (SingleTimeErrorMessages[ModInfo].Add(message))
+                ModInfo.Error($"{message}: {X}");
         }
+
+        public static void ErrorOnce(object Context, Exception X)
+            => ErrorOnce(ModInfo: null, Context, X)
+            ;
+
+        public static void Warn(ModInfo ModInfo, object Message)
+            => (ModInfo ?? ThisMod).Warn(Message)
+            ;
+
+        public static void Warn(object Message)
+            => Warn(ModInfo: null, Message)
+            ;
+
+        public static void Warn(ModInfo ModInfo, object Context, Exception X)
+            => Warn(ModInfo, $"{Context}: {X}")
+            ;
+
+        public static void Warn(object Context, Exception X)
+            => Warn(ModInfo: null, Context, X)
+            ;
+
+        public static void Warn(ModInfo ModInfo, object Message, StackTrace WithTrace)
+            => Warn(ModInfo: ModInfo, Message: (WithTrace ?? new StackTrace(1)).FramesToString(Count: 5, SkipLines: 0, TextLineBefore: $"{Message}:"))
+            ;
+
+        public static void Warn(object Message, StackTrace WithTrace)
+            => Warn(ModInfo: null, Message: Message, WithTrace: WithTrace ?? new StackTrace(1))
+            ;
+
+        public static void WarnOnce(ModInfo ModInfo, object Message)
+        {
+            ModInfo ??= ThisMod;
+            SingleTimeWarnMessages ??= new();
+            if (!SingleTimeWarnMessages.ContainsKey(ModInfo))
+                SingleTimeWarnMessages[ModInfo] = new();
+
+            string message = Message.ToString();
+            if (SingleTimeWarnMessages[ModInfo].Add(message))
+                ModInfo.Warn(message);
+        }
+
+        public static void WarnOnce(object Message)
+            => WarnOnce(ModInfo: null, Message)
+            ;
+
+        public static void WarnOnce(ModInfo ModInfo, object Context, Exception X)
+        {
+            ModInfo ??= ThisMod;
+            SingleTimeWarnMessages ??= new();
+            if (!SingleTimeWarnMessages.ContainsKey(ModInfo))
+                SingleTimeWarnMessages[ModInfo] = new();
+
+            string message = Context.ToString();
+            if (SingleTimeWarnMessages[ModInfo].Add(message))
+                ModInfo.Warn($"{message}: {X}");
+        }
+
+        public static void WarnOnce(object Context, Exception X)
+            => WarnOnce(ModInfo: null, Context, X)
+            ;
+
+        public static void WarnOnce(ModInfo ModInfo, object Message, StackTrace WithTrace)
+            => WarnOnce(ModInfo: ModInfo, Message: (WithTrace ?? new StackTrace(1)).FramesToString(Count: 5, SkipLines: 0, TextLineBefore: $"{Message}:"))
+            ;
+
+        public static void WarnOnce(object Message, StackTrace WithTrace)
+            => WarnOnce(ModInfo: null, Message: Message, WithTrace: WithTrace ?? new StackTrace(1))
+            ;
+
+        public static void Info(object Message)
+            => MetricsManager.LogModInfo(ThisMod, Message)
+            ;
+
+        public static void Log(object Message)
+            => UnityEngine.Debug.Log(Message)
+            ;
+
+        public static void LogOnce(object Message)
+        {
+            SingleTimeLogMessages ??= new();
+            string message = Message.ToString();
+            if (SingleTimeLogMessages.Add(message))
+                Log(message);
+        }
+
+        public static T LogReturn<T>(object Message, T Return)
+        {
+            Log(Message);
+            return Return;
+        }
+
+        private static string SafeInvoke<T>(this Func<string, string> PostProc, Func<T, string> Proc, T Element, string NoArg)
+        {
+            string proc = Proc?.Invoke(Element) ?? Element?.ToString() ?? NoArg;
+            if (PostProc != null)
+                proc = PostProc(proc);
+            return proc;
+        }
+
+        public static IEnumerable<T> Log<T>(IEnumerable<T> Source, object Message)
+        {
+            Log(Message);
+            return Source;
+        }
+
+        public static IEnumerable<T> Loggregate<T>(
+            IEnumerable<T> Source,
+            Func<T, string> Proc = null,
+            string Empty = null,
+            Func<string, string> PostProc = null
+            )
+            => Source.IsNullOrEmpty()
+            ? Log(Source, PostProc?.Invoke(Empty) ?? Empty)
+            : Source.Aggregate(
+                seed: Source,
+                func: (a, n) => Log(a, PostProc.SafeInvoke(Proc, n, "NO_ELEMENT")))
+            ;
+
+        #endregion
+        #region Aggregator Functions
+
+        public static string DelimitedAggregator<T>(string Accumulator, T Next, string Delimiter)
+           => $"{Accumulator}{(!Accumulator.IsNullOrEmpty() ? Delimiter : null)}{Next}"
+           ;
+
+        public static string CommaDelimitedAggregator<T>(string Accumulator, T Next)
+            => DelimitedAggregator(Accumulator, Next, ",")
+            ;
+
+        public static string CommaSpaceDelimitedAggregator<T>(string Accumulator, T Next)
+            => DelimitedAggregator(Accumulator, Next, ", ")
+            ;
+
+        public static string NewLineDelimitedAggregator<T>(string Accumulator, T Next)
+            => DelimitedAggregator(Accumulator, Next, "\n")
+            ;
+
+        public static string PeriodDelimitedAggregator<T>(string Accumulator, T Next)
+            => DelimitedAggregator(Accumulator, Next, ".")
+            ;
+
+        public static string PeriodSpaceDelimitedAggregator<T>(string Accumulator, T Next)
+            => DelimitedAggregator(Accumulator, Next, ". ")
+            ;
+
+        public static string PipeDelimitedAggregator<T>(string Accumulator, T Next, Func<string, T, string> Proc)
+            => DelimitedAggregator(Accumulator, Proc?.Invoke(Accumulator, Next) ?? Next?.ToString(), "|")
+            ;
+
+        public static string PipeDelimitedAggregator<T>(string Accumulator, T Next)
+            => PipeDelimitedAggregator(Accumulator, Next, null)
+            ;
+
+        public static string CallChain(params string[] Strings)
+            => Strings?.Aggregate("", PeriodDelimitedAggregator)
+            ;
+
+
+        #endregion
     }
 }

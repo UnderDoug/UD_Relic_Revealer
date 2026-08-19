@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 
@@ -44,5 +45,23 @@ namespace UD_Relic_Revealer.Mod
             }
             return lastHotkey;
         }
+
+        public static IEnumerable<string> FramesToStrings(this StackTrace StackTrace, int? Count = null, int SkipLines = 0)
+        {
+            StackTrace ??= new(SkipLines + 1);
+            var frames = StackTrace.GetFrames();
+            int count = frames?.Length ?? 0;
+            count = Math.Min(Count ?? count, count);
+            for (int i = 0; i < count; i++)
+                if (frames[i] is StackFrame frame)
+                    yield return frame.ToString();
+        }
+
+        public static string FramesToString(this StackTrace StackTrace, int? Count = null, int SkipLines = 0, string TextLineBefore = null)
+            => StackTrace.FramesToStrings(Count, SkipLines + 1)
+                .Aggregate(
+                    seed: TextLineBefore,
+                    func: Utils.NewLineDelimitedAggregator)
+            ;
     }
 }

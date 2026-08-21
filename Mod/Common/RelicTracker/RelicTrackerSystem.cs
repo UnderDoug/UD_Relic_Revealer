@@ -183,7 +183,7 @@ namespace UD_Relic_Revealer.Mod
         public override void AfterLoad(XRLGame game)
         {
             base.AfterLoad(game);
-            _CachedRelicRecords?.StableSortInPlace(TierComparison);
+            SyncRelics();
         }
 
         #endregion
@@ -240,19 +240,55 @@ namespace UD_Relic_Revealer.Mod
                     yield return record;
         }
 
-        public bool SynchRelicRecord(RelicRecord RelicRecord)
+        public bool SyncRelicRecord(RelicRecord RelicRecord)
         {
             if (CachedRelicRecords is not IEnumerable<RelicRecord> relicRecords)
                 return false;
 
             if (relicRecords?.FirstOrDefault(r => r.SameAs(RelicRecord)) is RelicRecord existingRecord)
             {
+                if (existingRecord == RelicRecord)
+                    return true;
+
                 existingRecord.Unpin();
                 RemoveRelic(existingRecord);
+                existingRecord.Dispose();
             }
 
             _CachedRelicRecords.Add(RelicRecord);
             return true;
+        }
+
+        public bool SyncRelic(UD_RelicTracker RelicTracker)
+        {
+            if (CachedRelicRecords is not IEnumerable<RelicRecord> relicRecords)
+                return false;
+
+            if (RelicTracker.ParentObject is not GameObject relic)
+                return false;
+
+            if (relicRecords?.FirstOrDefault(r => r.SameAs(relic)) is RelicRecord existingRecord)
+            {
+                if (existingRecord == RelicTracker.RelicRecord)
+                    return true;
+
+                RelicTracker.RelicRecord?.Dispose();
+                RelicTracker.RelicRecord = existingRecord;
+                RelicTracker.RelicRecord.Unpin(RefreshRelic: true);
+                return true;
+            }
+
+            return SyncRelicRecord(RelicTracker.RelicRecord);
+        }
+
+        public void SyncRelics()
+        {
+            using var relicRecords = ScopeDisposedList<RelicRecord>.GetFromPoolFilledWith(CachedRelicRecords);
+            foreach (var relicRecord in relicRecords)
+                if (relicRecord.Relic?.GetPart<UD_RelicTracker>() is UD_RelicTracker relicTracker)
+                    SyncRelic(relicTracker);
+
+            _CachedRelicRecords?.StableSortInPlace(TierComparison);
         }
 
         public RelicRecord GetFirstRecordOrDefault(Predicate<RelicRecord> Where = null)

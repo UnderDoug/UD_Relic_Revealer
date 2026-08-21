@@ -25,7 +25,7 @@ namespace XRL.World.Parts
         {
             base.FinalizeRead(Reader);
             if (RelicTrackerSystem.Instance is RelicTrackerSystem relicTrackerSystem)
-                relicTrackerSystem.SynchRelicRecord(RelicRecord);
+                relicTrackerSystem.SyncRelicRecord(RelicRecord);
         }
 
         public override IPart DeepCopy(GameObject Parent, Func<GameObject, GameObject> MapInv)

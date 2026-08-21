@@ -245,6 +245,11 @@ namespace UD_Relic_Revealer.Mod
             && BaseID == Other.BaseID
             ;
 
+        public bool SameAs(GameObject Relic)
+            => Relic != null
+            && BaseID == Relic.BaseID
+            ;
+
         public void SetClaimed()
             => IsClaimed = true
             ;

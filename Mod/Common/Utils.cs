@@ -30,6 +30,13 @@ namespace UD_Relic_Revealer.Mod
         public static string Author => ThisMod.Manifest.Author;
         public static string AuthorOnPlatforms => $"{Author} on GitHub (UnderDoug), on Discord (.underdoug), or on the Steam Workshop (UnderDoug)";
 
+        public const string TICK = "\u221A";  // √
+        public const string CROSS = "\u0058"; // X
+
+        public const string BULLET = "\u0007"; // •
+        public const string NBSP = "\xFF"; // " "
+        public const string DF = "\u000f"; // ☼
+
         #region Pseudo-Debug
 
         public static HashSet<string> SingleTimeLogMessages = new();
@@ -236,7 +243,133 @@ namespace UD_Relic_Revealer.Mod
             => Strings?.Aggregate("", PeriodDelimitedAggregator)
             ;
 
-
         #endregion
+
+        public static string GetProcessedItem(List<string> item, bool IsFirstSentence, List<List<string>> items, GameObject Object)
+        {
+            if (item.IsNullOrEmpty()
+                || item.Count < 2)
+                return null;
+
+            string verb = item[0];
+            string effect = item[1];
+            var firstElement = items[0];
+            bool isFirstInList = item == firstElement;
+            string does = Object.GetVerb(verb, PrependSpace: false);
+            string @is = Object.Are();
+            switch (verb)
+            {
+                // "It effect" || "effect"
+                case "":
+                    if (!IsFirstSentence
+                        && isFirstInList)
+                        verb = $"{Object.It} ";
+                    break;
+
+                // "It is effect" || "is effect"
+                case null:
+                    if (!IsFirstSentence
+                        && isFirstInList)
+                        verb = $"{Object.Itis} ";
+                    else
+                    if (!isFirstInList
+                        || items.All(e => e == null || e.Count < 1 || e[0] == null))
+                        verb = $"{@is} ";
+                    break;
+
+                // "It verbs" || "verbs"
+                default:
+                    if (!IsFirstSentence
+                        && isFirstInList)
+                        verb = $"{Object.It} {does} ";
+                    else
+                        verb = $"{does} ";
+                    break;
+            }
+            return GameText.VariableReplace($"{verb}{effect}", Object);
+        }
+
+        public class StringPair
+        {
+            public KeyValuePair<string, string> Pair;
+
+            public string Key => Pair.Key;
+            public string Value => Pair.Value;
+
+            public StringPair()
+            { }
+
+            public StringPair(string Key, string Value)
+                : this()
+            {
+                Pair = new(Key, Value);
+            }
+
+            public void Deconstruct(out KeyValuePair<string, string> Pair)
+            {
+                Pair = this.Pair;
+            }
+
+            public void Deconstruct(out string Key, out string Value)
+            {
+                Key = Pair.Key;
+                Value = Pair.Value;
+            }
+        }
+
+        public static string GetProcessedItem(
+            StringPair Item,
+            bool IsFirstSentence,
+            IList<StringPair> Items,
+            GameObject Object,
+            string It = null,
+            string Is = null,
+            string ItIs = null
+            )
+        {
+            if (Item.Key.IsNullOrEmpty()
+                && Item.Value.IsNullOrEmpty())
+                return null;
+
+            string verb = Item.Key;
+            string effect = Item.Value;
+            var firstElement = Items[0];
+            bool isFirstInList = Item == firstElement;
+            string does = Object?.GetVerb(verb, PrependSpace: false) ?? verb;
+            string @is = Object?.Are() ?? Is ?? "is";
+            switch (verb)
+            {
+                // "It effect" || "effect"
+                case "":
+                    if (!IsFirstSentence
+                        && isFirstInList)
+                        verb = $"{Object?.It ?? It ?? "It"} ";
+                    break;
+
+                // "It is effect" || "is effect"
+                case null:
+                    if (!IsFirstSentence
+                        && isFirstInList)
+                        verb = $"{Object?.Itis ?? ItIs ?? "It is"} ";
+                    else
+                    if (!isFirstInList
+                        || Items.All(e => e.Key == null))
+                        verb = $"{@is} ";
+                    break;
+
+                // "It verbs" || "verbs"
+                default:
+                    if (!IsFirstSentence
+                        && isFirstInList)
+                        verb = $"{Object?.It ?? It ?? "It"} {does} ";
+                    else
+                        verb = $"{does} ";
+                    break;
+            }
+            string output = $"{verb}{effect}";
+            if (Object != null)
+                output = GameText.VariableReplace(output, Object);
+            return output;
+        }
     }
 }

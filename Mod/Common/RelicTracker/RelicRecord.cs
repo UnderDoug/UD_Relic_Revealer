@@ -5,6 +5,7 @@ using System.Text;
 
 using ConsoleLib.Console;
 
+using Qud.API;
 using Qud.UI;
 
 using XRL;
@@ -48,7 +49,8 @@ namespace UD_Relic_Revealer.Mod
                     else
                     {
                         GameObjectReference.Free(ref RelicReference);
-                        if (!IsDestroyed)
+                        if (!IsDestroyed
+                            && ForReliquary <= 0)
                             RelicTrackerSystem.Instance?.RemoveRelic(this);
                     }
                 }
@@ -61,7 +63,10 @@ namespace UD_Relic_Revealer.Mod
         public int Tier => (_Tier ??= Relic?.GetTier()) ?? 0;
 
         private string _DisplayName;
-        public string DisplayName => _DisplayName ??= Relic?.GetDisplayName(AsIfKnown: true, Short: true, Reference: true);
+        public string DisplayName => _DisplayName ??= GetRelicDisplayName(Relic);
+
+        private string _RelicName;
+        public string RelicName => _RelicName ??= Relic.GetPropertyOrTag(nameof(RelicName));
 
         private string _IndicativeProximal;
         public string IndicativeProximal => _IndicativeProximal ??= Relic?.IndicativeProximal;
@@ -91,7 +96,21 @@ namespace UD_Relic_Revealer.Mod
         }
 
         private string _Description;
-        public string Description => _Description ??= Relic?.GetPart<Description>()?.GetLongDescription();
+        public string Description
+        {
+            get
+            {
+                try
+                {
+                    _Description ??= Relic?.GetPart<Description>()?.GetLongDescription();
+                }
+                catch (Exception x)
+                {
+                    WarnOnce($"Failed to {nameof(XRL.World.Parts.Description.GetLongDescription)} for {DebugString()}", x);
+                }
+                return _Description;
+            }
+        }
 
         private string _Story;
         public string Story => _Story ??= Relic?.GetPropertyOrTag("Story");
@@ -126,6 +145,13 @@ namespace UD_Relic_Revealer.Mod
             }
         }
 
+        private int _ForReliquary;
+        public int ForReliquary
+        {
+            get => _ForReliquary;
+            protected set => _ForReliquary = value;
+        }
+
         private bool _IsClaimed;
         public bool IsClaimed
         {
@@ -153,7 +179,8 @@ namespace UD_Relic_Revealer.Mod
                 || IsPinned()
                 || (GameObject.Validate(Relic)
                     && !Relic.IsPooled()
-                    && BaseID != 0))
+                    && BaseID != 0)
+                || ForReliquary > 0)
             && Render != null
             && (_Valid
                 || IsPinned())
@@ -175,12 +202,14 @@ namespace UD_Relic_Revealer.Mod
 
         private bool _Valid = true;
 
+        private bool _Synched;
+
         public GameObject Holder => Relic?.Holder;
 
         public RelicRecord()
         { }
 
-        public RelicRecord(GameObject Relic)
+        public RelicRecord(GameObject Relic, int IsForReliquary = 0)
             : this()
         {
             this.Relic = Relic;
@@ -188,11 +217,14 @@ namespace UD_Relic_Revealer.Mod
             var trackerPart = this.Relic.RequirePart<UD_RelicTracker>();
             trackerPart.RelicRecord = this;
 
+            if (IsForReliquary > 0)
+                this.ForReliquary = IsForReliquary;
+
             Init();
         }
 
-        public RelicRecord(GameObject Relic, RelicRecord SourceRecord)
-            : this(Relic)
+        public RelicRecord(GameObject Relic, RelicRecord SourceRecord, int IsForReliquary = 0)
+            : this(Relic, IsForReliquary)
         {
             if (SourceRecord != null)
                 IsClaimed = SourceRecord.IsClaimed;
@@ -201,10 +233,11 @@ namespace UD_Relic_Revealer.Mod
         public void Write(SerializationWriter Writer)
         {
             Writer.Write(RelicReference);
-            Writer.WriteNullable(_Tier);
+            Writer.WriteOptimized(Tier);
             Writer.WriteOptimized(DisplayName);
+            Writer.WriteOptimized(RelicName);
             Writer.WriteOptimized(IndicativeProximal);
-            Writer.WriteNullable(_IsPlural);
+            Writer.Write(IsPlural);
             Writer.WriteOptimized(it);
             Writer.WriteOptimized(@is);
             Writer.WriteOptimized(itIs);
@@ -213,6 +246,7 @@ namespace UD_Relic_Revealer.Mod
             Writer.WriteOptimized(Story);
             Writer.WriteOptimized(LastHeldBy);
             Writer.Write(LastHeldByPlayer);
+            Writer.WriteOptimized(ForReliquary);
             Writer.Write(IsClaimed);
             Writer.Write(IsDestroyed);
             Writer.Write(_Valid);
@@ -222,10 +256,11 @@ namespace UD_Relic_Revealer.Mod
         public void Read(SerializationReader Reader)
         {
             RelicReference = Reader.ReadGameObjectReference();
-            _Tier = Reader.ReadNullableInt32();
+            _Tier = Reader.ReadOptimizedInt32();
             _DisplayName = Reader.ReadOptimizedString();
+            _RelicName = Reader.ReadOptimizedString();
             _IndicativeProximal = Reader.ReadOptimizedString();
-            _IsPlural = Reader.ReadNullableBoolean();
+            _IsPlural = Reader.ReadBoolean();
             _it = Reader.ReadOptimizedString();
             _is = Reader.ReadOptimizedString();
             _itIs = Reader.ReadOptimizedString();
@@ -234,21 +269,44 @@ namespace UD_Relic_Revealer.Mod
             _Story = Reader.ReadOptimizedString();
             _LastHeldBy = Reader.ReadOptimizedString();
             _LastHeldByPlayer = Reader.ReadBoolean();
+            _ForReliquary = Reader.ReadOptimizedInt32();
             _IsClaimed = Reader.ReadBoolean();
             _IsDestroyed = Reader.ReadBoolean();
             _Valid = Reader.ReadBoolean();
             _Pinned = Reader.ReadBoolean();
         }
 
-        public bool SameAs(RelicRecord Other)
-            => Other != null
-            && BaseID == Other.BaseID
+        public static string GetRelicDisplayName(GameObject Relic)
+            => Relic?.GetDisplayName(AsIfKnown: true, Reference: true)
             ;
 
+        public bool SameAs(RelicRecord Other)
+        {
+            if (Other == null)
+                return false;
+
+            if (BaseID == Other.BaseID)
+                return true;
+            
+            return (ForReliquary > 0
+                    || Other.ForReliquary > 0)
+                && ForReliquary == Other.ForReliquary
+                && RelicName == Other.RelicName
+                ;
+        }
+
         public bool SameAs(GameObject Relic)
-            => Relic != null
-            && BaseID == Relic.BaseID
-            ;
+        {
+            if (Relic == null)
+                return false;
+
+            if (BaseID == Relic.BaseID)
+                return true;
+
+            return ForReliquary > 0
+                && RelicName == Relic?.GetPropertyOrTag("RelicName");
+                ;
+        }
 
         public void SetClaimed()
             => IsClaimed = true
@@ -332,6 +390,14 @@ namespace UD_Relic_Revealer.Mod
             });
         }
 
+        public bool SetSynched(RelicTrackerSystem RelicTrackerSystem)
+        {
+            if (RelicTrackerSystem == null)
+                return false;
+
+            return _Synched = RelicTrackerSystem.HasRelicRecord(this, ForSync: true);
+        }
+
         public string GetStatus()
         {
             Init();
@@ -360,6 +426,12 @@ namespace UD_Relic_Revealer.Mod
                     symbol = CROSS;
             }
 
+            if (ForReliquary > 0)
+            {
+                symbol = $"{ForReliquary}";
+                color = "K";
+            }
+
             return symbol.Colored(color);
         }
 
@@ -382,6 +454,7 @@ namespace UD_Relic_Revealer.Mod
                 .AppendPair(nameof(HasValidRelic), RelicRecord.HasValidRelic).Append("; ")
                 .AppendPair(nameof(IsRemainingCached), RelicRecord.IsRemainingCached).Append("; ")
                 .AppendPair(nameof(IsDestroyed), RelicRecord.IsDestroyed).Append("; ")
+                .AppendPair(nameof(ForReliquary), RelicRecord.ForReliquary).Append("; ")
                 .AppendPair(nameof(_Valid), RelicRecord._Valid).Append("; ")
                 .AppendPair(nameof(_Pinned), RelicRecord._Pinned);
 
@@ -400,6 +473,8 @@ namespace UD_Relic_Revealer.Mod
 
             _ = LastHeldBy;
 
+            bool currentlyPlayerHeld = Holder?.IsPlayer() is true;
+
             var sBDesc = Event.NewStringBuilder(Description);
             using var elements = ScopeDisposedList<StringPair>.GetFromPool();
             if (IsClaimed)
@@ -410,31 +485,45 @@ namespace UD_Relic_Revealer.Mod
             if (IsCached
                 && !IsExitingCache)
             {
-                elements.Add(new("are", "{{C|currently cached}}".Colored("C")));
+                elements.Add(new("are", "currently cached".Colored("C")));
             }
 
-            if (elements.IsNullOrEmpty())
+            if (ForReliquary > 0)
             {
-                elements.Add(new("exist", "somewhere in the current zone".Colored("W")));
-            }
-
-            if (!LastHeldBy.IsNullOrEmpty())
-            {
-                if (Holder?.IsPlayer() is true)
-                    elements.Add(new(null, "currently in your possession".Colored("G")));
-                else
-                {
-                    string lastHeldBy = LastHeldByPlayer
-                        ? $"{"you".Colored("g")}, although you {"don't currently".Colored("W")} possess {it}"
-                        : LastHeldBy.Colored("W");
-
-                    elements.Add(new("", $"was last held by {lastHeldBy}"));
-                }
+                elements.Add(new("are", $"inside the reliquary of {HistoryAPI.GetSultanForPeriod(ForReliquary).entity.Name}, the {Grammar.Ordinal(ForReliquary)} era sultan".Colored("W")));
             }
             else
-            if (!IsCached
-                || IsExitingCache)
-                elements.Add(new("are", "in an {{r|unknown}} last locaiton"));
+            {
+                if (!currentlyPlayerHeld
+                    && (Relic?.CurrentZone == The.ActiveZone
+                        || Relic?.InInventory?.CurrentZone == The.ActiveZone))
+                {
+                    elements.Add(new("are", "somewhere {{W|in this zone}}"));
+                }
+
+                if (!LastHeldBy.IsNullOrEmpty())
+                {
+                    if (currentlyPlayerHeld)
+                        elements.Add(new(null, "currently {{G|in your possession}}"));
+                    else
+                    {
+                        string lastHeldBy = LastHeldByPlayer
+                            ? $"{"you".Colored("g")}, although you {"don't currently".Colored("W")} possess {it}"
+                            : LastHeldBy.Colored("W");
+
+                        elements.Add(new("", $"was last held by {lastHeldBy}"));
+                    }
+                }
+                else
+                if (!IsCached
+                    || IsExitingCache)
+                    elements.Add(new("are", "in an {{r|unknown}} last locaiton"));
+
+                if (elements.IsNullOrEmpty())
+                {
+                    elements.Add(new("have", "become {{r|untethered from reality}}"));
+                }
+            }
 
             sBDesc.AppendLine().AppendLine()
                 .Append(IndicativeProximal).Append(" ").Append(IsPlural ? "relics" : "relic").Append(" ")
@@ -443,10 +532,10 @@ namespace UD_Relic_Revealer.Mod
                         seed: new List<string>(),
                         func: delegate (List<string> acc, StringPair next)
                         {
-                            acc.Add(GetProcessedItem(next, true, elements, Relic, it, @is, itIs));
+                            acc.Add(GetProcessedItem(next, true, elements, Relic, it, @is, itIs).Replace(",", "``"));
                             return acc;
                         })
-                    ))
+                    ).Replace("``", ","))
                 .Append(".");
 
             if (IsDestroyed)
@@ -482,9 +571,13 @@ namespace UD_Relic_Revealer.Mod
 
         public void Dispose()
         {
+            if (ForReliquary > 0)
+                Relic.Release();
+
             GameObjectReference.Free(ref RelicReference);
             _Tier = null;
             _DisplayName = null;
+            _RelicName = null;
             _IndicativeProximal = null;
             _IsPlural = null;
             _it = null;
@@ -495,10 +588,12 @@ namespace UD_Relic_Revealer.Mod
             _Story = null;
             _LastHeldBy = null;
             _LastHeldByPlayer = false;
+            _ForReliquary = 0;
             _IsClaimed = false;
             _IsDestroyed = false;
             _Valid = false;
             _Pinned = false;
+            _Synched = false;
         }
     }
 }

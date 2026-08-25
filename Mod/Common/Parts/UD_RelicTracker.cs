@@ -12,6 +12,7 @@ namespace XRL.World.Parts
     [Serializable]
     public class UD_RelicTracker : IScribedPart
     {
+        [NonSerialized]
         public RelicRecord RelicRecord;
 
         [SerializeField]
@@ -20,6 +21,18 @@ namespace XRL.World.Parts
         public UD_RelicTracker()
             : base()
         { }
+
+        public override void Write(GameObject Basis, SerializationWriter Writer)
+        {
+            base.Write(Basis, Writer);
+            Writer.WriteComposite(RelicRecord);
+        }
+
+        public override void Read(GameObject Basis, SerializationReader Reader)
+        {
+            base.Read(Basis, Reader);
+            RelicRecord = Reader.ReadComposite<RelicRecord>();
+        }
 
         public override void FinalizeRead(SerializationReader Reader)
         {
@@ -78,7 +91,8 @@ namespace XRL.World.Parts
         public override void Remove()
         {
             if (!RelicRecord.IsDestroyed)
-                RelicTrackerSystem.Instance?.RemoveRelic(RelicRecord);
+                RelicRecord.Dispose();
+
             base.Remove();
         }
 

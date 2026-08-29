@@ -10,6 +10,7 @@ using Qud.UI;
 
 using XRL;
 using XRL.Collections;
+using XRL.Language;
 using XRL.UI;
 using XRL.Wish;
 using XRL.World;
@@ -32,6 +33,9 @@ namespace UD_Relic_Revealer.Mod
 
         public const string TICK = "\u221A";  // √
         public const string CROSS = "\u0058"; // X
+        public const string SQUR = "\xfe"; // ■
+        public const string LNES = "\xf0"; // ≡
+        public const string CIRC = "\x09"; // ○
 
         public const string BULLET = "\u0007"; // •
         public const string NBSP = "\xFF"; // " "
@@ -335,7 +339,7 @@ namespace UD_Relic_Revealer.Mod
             string effect = Item.Value;
             var firstElement = Items[0];
             bool isFirstInList = Item == firstElement;
-            string does = Object?.GetVerb(verb, PrependSpace: false) ?? verb;
+            string does = Object?.GetVerb(verb, PrependSpace: false) ?? Grammar.ThirdPerson(verb);
             string @is = Object?.Are() ?? Is ?? "is";
             switch (verb)
             {
@@ -371,5 +375,18 @@ namespace UD_Relic_Revealer.Mod
                 output = GameText.VariableReplace(output, Object);
             return output;
         }
+
+        public static GameObjectBlueprint GetSultanMaskBlueprintByPeriod(int Period)
+            => GameObjectFactory.Factory?.GetBlueprintIfExists(Period switch
+            {
+                6 => "The Nil Face",
+                5 => "The Olive Face",
+                4 => "The Levant Face",
+                3 => "The Earth Face",
+                2 => "The Shemesh Face",
+                1 => "The Kesil Face",
+                _ => "The Nil Face",
+            })
+            ;
     }
 }

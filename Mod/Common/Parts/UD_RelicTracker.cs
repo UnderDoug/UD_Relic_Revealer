@@ -12,10 +12,21 @@ namespace XRL.World.Parts
     [Serializable]
     public class UD_RelicTracker : IScribedPart
     {
+        protected Guid _TrackerID;
+        public Guid TrackerID
+        {
+            get
+            {
+                if (_TrackerID.IsEmptyOrDefault())
+                    TrackerID = Guid.NewGuid();
+                return _TrackerID;
+            }
+            protected set => _TrackerID = value;
+        }
+
         [NonSerialized]
         public RelicRecord RelicRecord;
 
-        [SerializeField]
         private bool Update;
 
         public UD_RelicTracker()
@@ -25,20 +36,23 @@ namespace XRL.World.Parts
         public override void Write(GameObject Basis, SerializationWriter Writer)
         {
             base.Write(Basis, Writer);
-            Writer.WriteComposite(RelicRecord);
+            Writer.Write(TrackerID);
+            Writer.Write(Update);
         }
 
         public override void Read(GameObject Basis, SerializationReader Reader)
         {
             base.Read(Basis, Reader);
-            RelicRecord = Reader.ReadComposite<RelicRecord>();
+            _TrackerID = Reader.ReadGuid();
+            Update = Reader.ReadBoolean();
         }
 
         public override void FinalizeRead(SerializationReader Reader)
         {
             base.FinalizeRead(Reader);
+
             if (RelicTrackerSystem.Instance is RelicTrackerSystem relicTrackerSystem)
-                relicTrackerSystem.SyncRelicRecord(RelicRecord);
+                relicTrackerSystem.SyncRelicRecord(ref RelicRecord, this);
         }
 
         public override IPart DeepCopy(GameObject Parent, Func<GameObject, GameObject> MapInv)
@@ -73,7 +87,10 @@ namespace XRL.World.Parts
 
             if (CopyID
                 && originalRecord?.IsExitingCache is true)
+            {
+                originalRecord.Unpin(); // possibly issue?
                 relicTrackerSystem?.RemoveRelic(originalRecord);
+            }
 
             bool? recorded = null;
             if (relicTrackerSystem == null
@@ -91,9 +108,44 @@ namespace XRL.World.Parts
         public override void Remove()
         {
             if (!RelicRecord.IsDestroyed)
-                RelicRecord.Dispose();
+                RelicRecord?.Dispose();
 
             base.Remove();
+        }
+
+        public UD_RelicTracker Init(RelicRecord RelicRecord)
+        {
+            if (RelicRecord == null)
+                return null;
+
+            if (RelicRecord == this.RelicRecord
+                && this.RelicRecord.TrackerID == TrackerID)
+                return this;
+
+            this.RelicRecord = RelicRecord;
+            this.RelicRecord.ParentTracker = this;
+
+            SetTrackerID(RelicRecord.TrackerID);
+
+            this.RelicRecord.Init();
+            return ParentObject == RelicRecord.Relic
+                ? this
+                : null
+                ;
+        }
+
+        public void SetTrackerID(Guid TrackerID)
+        {
+            bool registerTrackerForSync = false;
+            var relicTrackerSystem = RelicTrackerSystem.Instance;
+
+            if (relicTrackerSystem != null)
+                registerTrackerForSync = relicTrackerSystem.UnregisterTrackerForSync(this);
+
+            this.TrackerID = TrackerID;
+
+            if (registerTrackerForSync)
+                relicTrackerSystem.RegisterTrackerForSync(this);
         }
 
         public override bool WantTurnTick()
@@ -119,11 +171,25 @@ namespace XRL.World.Parts
 
         public override bool WantEvent(int ID, int Cascade)
             => base.WantEvent(ID, Cascade)
+            || ID == ReplicaCreatedEvent.ID
             || ID == AddedToInventoryEvent.ID
             || ID == StackCountChangedEvent.ID
             || ID == OnDestroyObjectEvent.ID
             || ID == ZoneThawedEvent.ID
+            || ID == ZoneActivatedEvent.ID
+            || ID == GetDebugInternalsEvent.ID
             ;
+
+        public override bool HandleEvent(ReplicaCreatedEvent E)
+        {
+            if (ParentObject == E.Object
+                && E.Context == "AscendLunarRegent")
+            {
+                ParentObject.RemovePart(this);
+                return true;
+            }
+            return base.HandleEvent(E);
+        }
 
         public override bool HandleEvent(AddedToInventoryEvent E)
         {
@@ -146,9 +212,9 @@ namespace XRL.World.Parts
             if (ParentObject == E.Object)
             {
                 if (!E.Silent)
-                    RelicRecord.Destroy();
+                    RelicRecord?.Destroy();
                 else
-                    RelicRecord.Dispose();
+                    RelicRecord?.Dispose();
             }
 
             return base.HandleEvent(E);
@@ -162,6 +228,14 @@ namespace XRL.World.Parts
             return base.HandleEvent(E);
         }
 
+        public override bool HandleEvent(ZoneActivatedEvent E)
+        {
+            if (ParentObject?.CurrentZone == E.Zone)
+                Update = true;
+
+            return base.HandleEvent(E);
+        }
+
         public override bool FireEvent(Event E)
         {
             if (E.ID == "CommandTakeObject")
@@ -171,10 +245,18 @@ namespace XRL.World.Parts
             else
             if (E.ID == "ZoneFreezing")
             {
-                RelicRecord?.Pin(ClearRelic: true);
+                RelicRecord?.Pin();
             }
 
             return base.FireEvent(E);
+        }
+
+        public override bool HandleEvent(GetDebugInternalsEvent E)
+        {
+            E.AddEntry(this, nameof(TrackerID), TrackerID.ToString());
+            E.AddEntry(this, nameof(Update), Update);
+            E.AddEntry(this, nameof(RelicRecord), RelicRecord?.GetDebugLines(FieldsOnly: true)?.Aggregate((string)null, Utils.NewLineDelimitedAggregator));
+            return base.HandleEvent(E);
         }
     }
 }

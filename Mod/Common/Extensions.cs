@@ -212,8 +212,6 @@ namespace UD_Relic_Revealer.Mod
             : "is"
             ;
 
-
-
         public static void SuspendExaminerDuringAction(this GameObject Relic, Action Action)
         {
             int epistemicStatus = -1;
@@ -233,5 +231,28 @@ namespace UD_Relic_Revealer.Mod
                     examiner.EpistemicStatus = epistemicStatus;
             }
         }
+
+        public static void RemoveAll<T>(this ScopeDisposedList<T> Source, Predicate<T> Where)
+        {
+            if (Source.IsNullOrEmpty())
+                return;
+
+            for (int i = Source.Count - 1; i >= 0; i--)
+                if (Where?.Invoke(Source[i]) is true)
+                    Source.RemoveAt(i);
+        }
+
+        public static void RemoveLast<T>(this ScopeDisposedList<T> Source)
+        {
+            if (Source.IsNullOrEmpty())
+                return;
+
+            Source.RemoveAt(Source.Count - 1);
+        }
+
+        public static bool IsEmptyOrDefault(this Guid Guid)
+            => Guid == default
+            || Guid == Guid.Empty
+            ;
     }
 }

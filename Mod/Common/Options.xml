@@ -1,0 +1,47 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<options>
+  <option
+        ID="Option_UD_Relic_Revealer_EnableShowOnWorldGen"
+        DisplayText="Enable showing the relic revealer after world gen"
+        Category="Mod: UD Relic Revealer"
+        Type="Checkbox"
+        Default="Yes"
+    >
+    <helptext>
+      When enabled, after world generation has been completed and immediately before control is handed to you, the relic revealer will be displayed.
+
+      The default is {{w|Enabled}}.
+    </helptext>
+  </option>
+  
+  <option
+        ID="Option_UD_Relic_Revealer_EnableReshowOnGameLoad"
+        Requires="Option_UD_Relic_Revealer_EnableShowOnWorldGen==Yes"
+        DisplayText="Enable showing the relic revealer again when a save is loaded"
+        Category="Mod: UD Relic Revealer"
+        Type="Checkbox"
+        Default="No"
+    >
+    <helptext>
+      When enabled, after a save game is loaded and immediately before control is handed to you, the relic revealer will be displayed.
+
+      The default is {{w|Disabled}}.
+    </helptext>
+  </option>
+  
+  <option
+        ID="Option_UD_Relic_Revealer_EnableRelicRevealerActivatedAbility"
+        DisplayText="Enable a set of two activated abilities for revealing relics and revealing cherubim"
+        Category="Mod: UD Relic Revealer"
+        Type="Checkbox"
+        Default="No"
+    >
+    <helptext>
+      When enabled, you gain two activated abilities, one each for revealing relics (showing the Relic Tracker), and revealing cherubim (showing the Cherubim Viewer).
+      
+      Toggling this option should add and remove the relevant activated abilities.
+
+      The default is {{w|Disabled}}.
+    </helptext>
+  </option>
+</options>

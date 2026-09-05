@@ -113,7 +113,7 @@ namespace XRL.World.Parts
             base.Remove();
         }
 
-        public UD_RelicTracker Init(RelicRecord RelicRecord)
+        public UD_RelicTracker Init(RelicRecord RelicRecord, bool InitRecord = false)
         {
             if (RelicRecord == null)
                 return null;
@@ -127,11 +127,10 @@ namespace XRL.World.Parts
 
             SetTrackerID(RelicRecord.TrackerID);
 
-            this.RelicRecord.Init();
-            return ParentObject == RelicRecord.Relic
-                ? this
-                : null
-                ;
+            if (InitRecord)
+                this.RelicRecord.Init();
+
+            return this;
         }
 
         public void SetTrackerID(Guid TrackerID)

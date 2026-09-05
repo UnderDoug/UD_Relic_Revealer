@@ -1,11 +1,16 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
+
+using UD_Relic_Revealer.Mod.UI;
 
 using XRL;
 using XRL.Collections;
+using XRL.Language;
 using XRL.World;
 using XRL.World.Capabilities;
 using XRL.World.Parts;
@@ -254,5 +259,192 @@ namespace UD_Relic_Revealer.Mod
             => Guid == default
             || Guid == Guid.Empty
             ;
+
+        public static string OrdinalSuffix(this int Number)
+            => $"{Number}{Grammar.Ordinal(Number)[^2..]}"
+            ;
+
+        public static IEnumerable<GameObjectBlueprint> SafelyGetBlueprintsInheritingFrom(
+            this GameObjectFactory Factory,
+            string Name,
+            bool ExcludeBase = true,
+            bool IncludeSelf = false
+            )
+        {
+            foreach (GameObjectBlueprint blueprint in Factory.BlueprintList.IteratorSafe())
+                if (blueprint.InheritsFromSafe(Name, IncludeSelf)
+                    && (!ExcludeBase
+                        || !blueprint.IsBaseBlueprint()))
+                    yield return blueprint;
+        }
+
+        public static List<string> InheritanceRoots => new()
+        {
+            nameof(Object),
+            "SultanMuralController",
+        };
+
+        public static bool InheritsFromSafe(
+            this GameObjectBlueprint GameObjectBlueprint,
+            string What,
+            bool IncludeSelf = true
+            )
+        {
+            if (IncludeSelf
+                && GameObjectBlueprint?.Name == What)
+                return true;
+
+            string parentBlueprint = GameObjectBlueprint.Inherits;
+            while (!parentBlueprint.IsNullOrEmpty())
+            {
+                if (parentBlueprint == What)
+                    return true;
+
+                string inherits = parentBlueprint;
+                parentBlueprint = GameObjectFactory.Factory?.GetBlueprintIfExists(parentBlueprint)?.Inherits;
+                if (parentBlueprint.IsNullOrEmpty()
+                    && !InheritanceRoots.Contains(inherits))
+                {
+                    Utils.WarnOnce($"{nameof(Extensions)}.{nameof(InheritsFromSafe)}(\"{What}\"):" +
+                        $" bluprint ancestor \"{inherits}\" does not exist in blueprint list." +
+                        $" The first mention of this blueprint in this log should reveal the mod with this inheritance issue.");
+                }
+            }
+            return false;
+        }
+
+        public static T WaitResult<T>(this Task<T> Task)
+        {
+            if (Task == null)
+                return default;
+
+            Task.Wait();
+
+            return Task.Result;
+        }
+
+        public static async Task<TResult> AwaitResultIfNotIsCompletedSuccessfully<TResult>(this Task<TResult> ResultTask)
+            => (ResultTask?.IsCompletedSuccessfully) is true
+            ? ResultTask.Result
+            : await ResultTask
+            ;
+
+        public static bool IsTwixt(this int Value, int LowerInclusive, int UpperExclusive)
+            => Value >= LowerInclusive
+            && Value < UpperExclusive
+            ;
+
+        public static ulong ToUInt64<T>(this T Value)
+            where T : Enum
+            => Convert.GetTypeCode(Value) switch
+            {
+                TypeCode.SByte or
+                TypeCode.Int16 or
+                TypeCode.Int32 or
+                TypeCode.Int64 => (ulong)Convert.ToInt64(Value, CultureInfo.InvariantCulture),
+
+                TypeCode.Boolean or
+                TypeCode.Char or
+                TypeCode.Byte or
+                TypeCode.UInt16 or
+                TypeCode.UInt32 or
+                TypeCode.UInt64 => Convert.ToUInt64(Value, CultureInfo.InvariantCulture),
+
+                _ => throw new InvalidOperationException("Unknown enum type."),
+            };
+
+        public static bool IsTwixtInclusive<T>(this T Value, T Lower, T Upper)
+            where T : Enum
+            => Value.ToUInt64() >= Lower.ToUInt64()
+            && Value.ToUInt64() <= Upper.ToUInt64()
+            ;
+
+        public static bool? ToNullableBool(this UIUtils.CascadableResult Value)
+        {
+            if (Value <= UIUtils.CascadableResult.Continue)
+                return true;
+
+            if (Value <= UIUtils.CascadableResult.Back)
+                return false;
+
+            return null;
+        }
+
+        public static bool ToBool(this UIUtils.CascadableResult Value)
+            => Value <= UIUtils.CascadableResult.Continue
+            ;
+
+        public static bool IsContinue(this UIUtils.CascadableResult Value)
+            => Value.IsTwixtInclusive(UIUtils.CascadableResult.Continue, UIUtils.CascadableResult.Continue)
+            ;
+
+        public static bool IsBack(this UIUtils.CascadableResult Value)
+            => Value.IsTwixtInclusive(UIUtils.CascadableResult.Back, UIUtils.CascadableResult.BackSilent)
+            ;
+
+        public static bool IsCancel(this UIUtils.CascadableResult Value)
+            => Value >= UIUtils.CascadableResult.Cancel
+            ;
+
+        public static bool IsSilent(this UIUtils.CascadableResult Value)
+            => ((int)Value % 2) == ((int)UIUtils.CascadableResult.BackSilent % 2)
+            ;
+
+        public static UIUtils.CascadableResult ToCascadableResult(this bool? Value, bool Silent)
+        {
+            if (Value.GetValueOrDefault())
+                return UIUtils.CascadableResult.Continue;
+
+            var result = Value.HasValue
+                ? UIUtils.CascadableResult.Back
+                : UIUtils.CascadableResult.Cancel
+                ;
+
+            if (Silent)
+                result++;
+
+            return result;
+        }
+
+        public static UIUtils.CascadableResult ContinueIfNotCancel(this UIUtils.CascadableResult Value)
+            => !Value.IsCancel()
+            ? UIUtils.CascadableResult.Continue
+            : Value
+            ;
+
+        public static StringBuilder AppendLineEnd(this StringBuilder SB)
+            => SB.AppendLine().Append("=ud_nbsp=".StartReplace().ToString())
+            ;
+
+        public static StringBuilder AppendRule(this StringBuilder SB, object Value)
+            => Value != null
+            ? SB.AppendColored("rules", Value.ToString())
+            : SB
+            ;
+
+        public static StringBuilder AppendQuote(this StringBuilder SB, object Value)
+            => SB.Append("\"").Append(Value).Append("\"")
+            ;
+
+        public static StringBuilder AppendBullet(
+            this StringBuilder SB,
+            string Color = null,
+            string Bullet = "\u0007"
+            )
+        {
+            if (Color.IsNullOrEmpty())
+                SB.Append(Bullet);
+            else
+                SB.AppendColored(Color, Bullet);
+
+            return SB.Append(" ");
+        }
+
+        public static StringBuilder AppendBulletLine(
+            this StringBuilder SB,
+            string Color = null,
+            string Bullet = "\u0007"
+            )
+            => SB.AppendLine().AppendBullet(Color, Bullet);
     }
 }

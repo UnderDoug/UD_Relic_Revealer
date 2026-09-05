@@ -20,6 +20,7 @@ using XRL.World.Parts;
 namespace UD_Relic_Revealer.Mod
 {
     [HasGameBasedStaticCache]
+    [HasWishCommand]
     public static class Utils
     {
         public const string MOD_ID = "UD_Relic_Revealer";
@@ -388,5 +389,11 @@ namespace UD_Relic_Revealer.Mod
                 _ => "The Nil Face",
             })
             ;
+
+        #region Wishes
+
+        
+
+        #endregion
     }
 }

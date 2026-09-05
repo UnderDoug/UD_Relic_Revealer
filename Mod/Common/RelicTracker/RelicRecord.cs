@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 
 using ConsoleLib.Console;
 
@@ -9,6 +10,8 @@ using HistoryKit;
 
 using Qud.API;
 using Qud.UI;
+
+using UD_Relic_Revealer.Mod.UI;
 
 using XRL;
 using XRL.Collections;
@@ -64,7 +67,7 @@ namespace UD_Relic_Revealer.Mod
                     return null;
 
                 if (!_Synched)
-                    return null;
+                    return ParentTracker?.ParentObject;
 
                 if (ParentTracker == null
                     || ParentTracker.ParentObject == null
@@ -75,15 +78,7 @@ namespace UD_Relic_Revealer.Mod
                         && GameObject.FindByID(BaseID) is GameObject foundObject)
                         Relic = foundObject;
                     else
-                    {
                         Relic = null;
-                        if (!IsDestroyed
-                            && ForReliquary <= 0
-                            && !IsPinned())
-                        {
-                            _Valid = false;
-                        }
-                    }
                 }
                 return ParentTracker?.ParentObject;
             }
@@ -91,10 +86,11 @@ namespace UD_Relic_Revealer.Mod
             {
                 if (value != null)
                 {
+                    ClearCache();
                     BaseID = value.BaseID;
                     ParentTracker = value.RequirePart<UD_RelicTracker>().Init(this);
-                    ClearCache();
                     Pronouns = value?.GetPronounProvider();
+                    _Synched = true;
                     _Valid = true;
                     Init();
                 }
@@ -103,6 +99,7 @@ namespace UD_Relic_Revealer.Mod
                     ParentTracker?.ParentObject?.RemovePart(ParentTracker);
                     ParentTracker = null;
                     if (!IsDestroyed
+                        && ForReliquary <= 0
                         && !IsPinned())
                         _Valid = false;
                 }
@@ -151,7 +148,6 @@ namespace UD_Relic_Revealer.Mod
         public string RelicName => _RelicName ??= GetRelicRelicName(Relic);
 
         private string _Pronouns;
-
         public IPronounProvider Pronouns
         {
             get => Gender.GetIfExists(_Pronouns) as IPronounProvider
@@ -191,7 +187,7 @@ namespace UD_Relic_Revealer.Mod
                     if (_Description == null)
                     {
                         if (The.Player != null
-                            || PopulationManager.GetEach("BaseRelic_Food")?.Contains(Relic.Blueprint) is not true)
+                            || PopulationManager.GetEach("BaseRelic_Food")?.Contains(Relic?.Blueprint) is not true)
                             _Description = Relic?.GetPart<Description>()?.GetLongDescription();
                     }
                 }
@@ -331,12 +327,10 @@ namespace UD_Relic_Revealer.Mod
         public RelicRecord(GameObject Relic, int ForReliquary = 0)
             : this()
         {
-            this.Relic = Relic;
-
             if (ForReliquary > 0)
                 this.ForReliquary = ForReliquary;
 
-            Init();
+            this.Relic = Relic;
         }
 
         public RelicRecord(GameObject Relic, RelicRecord SourceRecord, int IsForReliquary = 0)
@@ -464,10 +458,13 @@ namespace UD_Relic_Revealer.Mod
 
         public void Destroy()
         {
+            var relic = Relic;
+
             IsDestroyed = true;
 
-            if (ForReliquary > 0)
-                Relic?.Release();
+            if (relic != null
+                && ForReliquary > 0)
+                relic.Release();
         }
 
         public void Pin()
@@ -499,9 +496,13 @@ namespace UD_Relic_Revealer.Mod
                     _Era = null;
                     _DisplayName = null;
                     _DisplayNameShort = null;
+                    _Pronouns = null;
                     _Render = null;
                     _Description = null;
                     _Story = null;
+
+                    _LastHeldBy = null;
+                    _LastHeldByPlayer = false;
                 }
             }
         }
@@ -606,7 +607,7 @@ namespace UD_Relic_Revealer.Mod
             Init();
 
             string symbol = Era > 0
-                ? $"{Era}{Grammar.Ordinal(Era)[^2..]}"
+                ? Era.OrdinalSuffix()
                 : " ? "
                 ;
 
@@ -684,11 +685,11 @@ namespace UD_Relic_Revealer.Mod
             => DebugString(this)
             ;
 
-        public void ViewRelic(bool Internals = false)
+        public async Task<UIUtils.CascadableResult> ViewRelicAsync(bool Internals = false)
         {
             if (!IsValidRecord
                 && !IsPinned())
-                return;
+                return UIUtils.CascadableResult.Continue;
 
             _ = LastHeldBy;
 
@@ -792,15 +793,16 @@ namespace UD_Relic_Revealer.Mod
                     text = "Recall {{W|S}}tory"
                 });
 
-            if (Popup.NewPopupMessageAsync(
+            if ((await Popup.NewPopupMessageAsync(
                     message: sBDesc.ToString(),
                     buttons: buttons,
                     contextTitle: sBName.ToString(),
-                    contextRender: Render
-                ).Result.command == "Story")
+                    contextRender: Render)
+                ).command == "Story")
             {
                 BookUI.ShowBookByID(Story);
             }
+            return UIUtils.CascadableResult.Continue;
         }
 
         public IEnumerable<string> GetDebugLines(bool FieldsOnly = true)

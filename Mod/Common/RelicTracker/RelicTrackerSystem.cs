@@ -10,8 +10,6 @@ using HistoryKit;
 using Qud.API;
 using Qud.UI;
 
-using UD_Relic_Revealer.Mod.Events;
-
 using XRL;
 using XRL.Collections;
 using XRL.Language;
@@ -20,7 +18,11 @@ using XRL.Wish;
 using XRL.World;
 using XRL.World.Parts;
 
+using UD_Relic_Revealer.Mod.Events;
+using UD_Relic_Revealer.Mod.UI;
+
 using SerializeField = UnityEngine.SerializeField;
+using System.Threading.Tasks;
 
 namespace UD_Relic_Revealer.Mod
 {
@@ -77,6 +79,39 @@ namespace UD_Relic_Revealer.Mod
             }
         }
 
+        private static IRenderable _RelicsIcon;
+        public static IRenderable RelicsIcon
+        {
+            get
+            {
+                if (_RelicsIcon == null)
+                {
+                    if (GameObjectFactory.Factory is not GameObjectFactory factory
+                        || factory.GetBlueprintIfExists("The Kesil Face")?.GetRenderable() is not IRenderable kesilFaceRender)
+                        return MissingIcon;
+                    _RelicsIcon = kesilFaceRender;
+                }
+                return _RelicsIcon;
+            }
+        }
+
+        private static List<GameObjectBlueprint> _CherubBlueprints;
+        public static IEnumerable<GameObjectBlueprint> CherubBlueprints
+        {
+            get
+            {
+                if (_CherubBlueprints.IsNullOrEmpty())
+                {
+                    _CherubBlueprints ??= new();
+                    foreach (var blueprint in (GameObjectFactory.Factory?.BlueprintList).IteratorSafe())
+                        if (blueprint.Name.EndsWith("Cherub")
+                            && !blueprint.IsBaseBlueprint())
+                            _CherubBlueprints.Add(blueprint);
+                }
+                return _CherubBlueprints;
+            }
+        }
+
         public static Comparison<RelicRecord> EraTierComparison = delegate (RelicRecord x, RelicRecord y)
         {
             if (x == null
@@ -101,11 +136,11 @@ namespace UD_Relic_Revealer.Mod
                     && tierComp != 0)
                     return tierComp;
 
-                if ((x.RelicName?.Strip()).CompareTo(y.RelicName?.Strip()) is int relicNameComp
+                if (string.Compare(x.RelicName?.Strip(), y.RelicName?.Strip()) is int relicNameComp
                     && relicNameComp != 0)
                     return relicNameComp;
 
-                return (x.DisplayName?.Strip()).CompareTo(y.DisplayName?.Strip());
+                return string.Compare(x.DisplayName?.Strip(), y.DisplayName?.Strip());
             }
             finally
             {
@@ -131,17 +166,43 @@ namespace UD_Relic_Revealer.Mod
                     HasShown = false;
                     _CachedRelicRecords = new(64);
                     _TrackersWantingRecords = new(64);
+                    _CachedCherubRecords = new(12);
                 }
             }
         }
 
         private Dictionary<Guid, RelicRecord> _CachedRelicRecords = new(64);
 
+
         private Dictionary<UD_RelicTracker, Guid> _TrackersWantingRecords = new(64);
 
         public IEnumerable<RelicRecord> RelicRecords => GetOrderedRecords();
 
         public IEnumerable<RelicRecord> ViewableRelicRecords => GetOrderedRecords(IsEligibleToShow);
+
+        private List<CherubRecord> _CachedCherubRecords = new(12);
+        public IEnumerable<CherubRecord> CherubRecords
+        {
+            get
+            {
+                if (_CachedCherubRecords.Count == 0)
+                {
+                    foreach ((var period, var variant) in CherubRecord.GetCherubPeriodVariantPairs())
+                    {
+                        var cherubRecord = new CherubRecord(period, variant);
+                        if (!cherubRecord.IsValid
+                            || _CachedCherubRecords.Contains(cherubRecord))
+                        {
+                            cherubRecord.Dispose();
+                            continue;
+                        }
+                        _CachedCherubRecords.Add(cherubRecord);
+                    }
+                    _CachedCherubRecords.StableSortInPlace();
+                }
+                return _CachedCherubRecords;
+            }
+        }
 
         public bool HasShown;
 
@@ -175,6 +236,10 @@ namespace UD_Relic_Revealer.Mod
         public static void AfterGameLoaded()
         {
             RelicTrackerSystemInit(WorldGen: false);
+
+            if (Options.EnableReshowOnGameLoad
+                && Instance?.HasShown is true)
+                Instance.AskRevealWhat();
         }
 
         [GameBasedCacheInit]
@@ -280,6 +345,8 @@ namespace UD_Relic_Revealer.Mod
 
         public void mutate(GameObject player)
         {
+            player?.RequirePart<UD_Player_RelicRevealer>();
+
             if (Instance.GameID == null)
                 Instance.GameID = The.Game.GameID;
             else
@@ -358,6 +425,9 @@ namespace UD_Relic_Revealer.Mod
 
             Utils.Log($"  {nameof(SyncRelics)}");
             SyncRelics();
+
+            Utils.Log($"  Requiring {nameof(UD_Player_RelicRevealer)}");
+            The.Player?.RequirePart<UD_Player_RelicRevealer>();
 
             Utils.Log($"  Load Complete!");
         }
@@ -776,62 +846,240 @@ namespace UD_Relic_Revealer.Mod
             => RelicRecord?.IsValidRecord is true
             ;
 
-        public void RevealRelics(bool RethrowOnError = false, bool ForceNoRelics = false, bool Debug = false)
+        public static async Task<UIUtils.CascadableResult> RevealRelicsAsync(
+            RelicTrackerSystem RelicTrackerSystem,
+            bool RethrowOnError = false,
+            bool ForceNoRelics = false,
+            bool Debug = false,
+            string Context = null
+            )
         {
+            bool abilityContext = Context?.Contains("ability") is true;
+
             if (The.Game.GetIntGameState("RobberChimesTriggered") is int robberChimesTriggered
                 && robberChimesTriggered > 1)
-                ProcessRobberChimesTriggered(TriggeredPeriod: robberChimesTriggered - 1);
+                RelicTrackerSystem.ProcessRobberChimesTriggered(TriggeredPeriod: robberChimesTriggered - 1);
 
-            ClearInvalid();
+            RelicTrackerSystem.ClearInvalid();
 
-            using var relics = RentRecords(IsEligibleToShow, EraTierComparison);
+            using var relics = RelicTrackerSystem.RentRecords(IsEligibleToShow, EraTierComparison);
 
             if (relics.IsNullOrEmpty()
                 || ForceNoRelics)
             {
-                Popup.ShowSpace(
-                    Message: "There don't appear to be any relics.",
-                    Title: "No Relics",
-                    AfterRender: NoRelicsIcon
+                await Popup.NewPopupMessageAsync(
+                    message: $"There don't appear to be any relic records.{(ForceNoRelics && !relics.IsNullOrEmpty() ? "\n\n{{K|This is the result of the ForceNoRelics flag.}}" : null)}",
+                    title: "{{R|No Relics}}",
+                    afterRender: NoRelicsIcon
                 );
-                return;
+                return UIUtils.CascadableResult.Continue;
             }
 
-            using var relicOptions = !Debug
-                ? ScopeDisposedList<string>.GetFromPoolFilledWith(relics.Select(RelicRecord.OptionDisplayString))
-                : ScopeDisposedList<string>.GetFromPoolFilledWith(relics.Select(RelicRecord.DebugString));
+            var result = UIUtils.CascadableResult.BackSilent;
 
-            using var relicRenders = ScopeDisposedList<IRenderable>.GetFromPoolFilledWith(relics.Select(r => r.Render));
-            using var relicHotkeys = ScopeDisposedList<char>.GetFromPool();
-            foreach (var relic in relics)
-                relicHotkeys.Add(relicHotkeys.GetNextHotKey());
-
+            using var options = new PickOptionDataSetAsync<RelicRecord, UIUtils.CascadableResult>();
+            var sB = Event.NewStringBuilder();
             try
             {
-                int result = -1;
+                string title = "{{W|Relic Tracker}}" + (Debug ? "{{W| ({{B|Debug Edition}})}}" : null);
                 do
                 {
-                    result = Popup.PickOption(
-                        Title: "{{W|Relics, Revealed!}}" + (Debug ? "{{W| ({{B|Debug Edition}})}}" : null),
-                        Intro: $"Below are the relics that generated for this world.\n\nSelect one to view it as though looking at it{(Debug ? ", including its internals if the GameObject is still present" : null)}.\n\xff",
-                        Options: relicOptions,
-                        Hotkeys: relicHotkeys,
-                        Icons: relicRenders,
-                        IntroIcon: RevealerIcon,
-                        AllowEscape: true,
-                        PopupID: nameof(RelicReveal_WishHandler));
+                    sB.Clear()
+                        .Append("Below are the relics that generated for this world.")
+                        .AppendLine()
+                        .AppendLine().Append("Select one to view it as though looking at it");
+                    if (Debug)
+                        sB.Append(", including its internals if the GameObject is still present");
 
-                    if (result >= 0)
-                        relics[result].ViewRelic(Internals: Debug);
+                    sB.Append(".");
+
+                    if (abilityContext
+                        && !Options.EnableShowOnWorldGen)
+                        sB.AppendLine()
+                            .AppendLine().Append("{{K|Note: there are options available in the options menu to show this popup at world gen and when loading a save.}}");
+
+                    sB.AppendLineEnd();
+
+                    options.Clear(Dispose: true);
+
+                    foreach (var relic in relics)
+                    {
+                        options.Add(new PickOptionData<RelicRecord, Task<UIUtils.CascadableResult>>
+                        {
+                            Element = relic,
+                            Text = !Debug ? relic.OptionDisplayString() : relic.DebugString(),
+                            Hotkey = options.GetHotkeys().GetNextHotKey(),
+                            Icon = relic.Render,
+                            Callback = async e => await e.ViewRelicAsync(Debug)
+                        });
+                    }
+
+                    result = await UIUtils.PerformPickOptionAsync(
+                        OptionDataSet: options,
+                        Title: title,
+                        Intro: sB.ToString(),
+                        IntroIcon: RevealerIcon,
+                        NoBackButton: abilityContext,
+                        CancelIsExit: abilityContext,
+                        DefaultSelected: 0,
+                        OnBackCallback: UIUtils.BackSilentResultAsync,
+                        OnEscapeCallback: UIUtils.CancelSilentResultAsync);
                 }
-                while (result >= 0);
+                while (result.IsContinue());
             }
             catch (Exception x)
             {
-                Utils.Error($"{nameof(RevealRelics)} failed to get cached relics", x);
+                Utils.Error($"{nameof(RevealRelicsAsync)} failed to get cached relics", x);
                 if (RethrowOnError)
                     throw x;
+
+                result = UIUtils.CascadableResult.Back;
             }
+            finally
+            {
+                Event.ResetTo(sB);
+            }
+
+            return result;
+        }
+
+        private UIUtils.CascadableResult RevealRelics(
+            ref WishParams WishParams,
+            bool RethrowOnError = false,
+            string Context = null
+            )
+            => RevealRelicsAsync(
+                RelicTrackerSystem: this,
+                RethrowOnError: RethrowOnError,
+                ForceNoRelics: WishParams.ForceNoRelics,
+                Debug: WishParams.Debug,
+                Context: Context)
+            .WaitResult()
+            ;
+
+        public UIUtils.CascadableResult RevealRelics(bool RethrowOnError = false, string Context = null)
+        {
+            WishParams wishParams = default;
+            return RevealRelics(ref wishParams, RethrowOnError: RethrowOnError, Context: Context);
+        }
+
+        public static async Task<UIUtils.CascadableResult> RevealCherubimAsync(
+            RelicTrackerSystem RelicTrackerSystem,
+            bool RethrowOnError = false,
+            bool ForceNoCherubim = false,
+            bool Debug = false,
+            string Context = null
+            )
+        {
+            bool abilityContext = Context?.Contains("ability") is true;
+
+            if (RelicTrackerSystem.CherubRecords is not IEnumerable<CherubRecord> cherubRecords
+                || cherubRecords.IsNullOrEmpty()
+                || ForceNoCherubim)
+            {
+                await Popup.NewPopupMessageAsync(
+                    message: $"There don't appear to be any cherubim records.{(ForceNoCherubim ? "\n\n{{K|This is the result of the ForceNoCherubim flag.}}" : null)}",
+                    title: "{{R|No Cherubim}}",
+                    afterRender: NoRelicsIcon
+                );
+                return UIUtils.CascadableResult.Continue;
+            }
+
+            var result = UIUtils.CascadableResult.BackSilent;
+
+            using var options = new PickOptionDataSetAsync<CherubRecord, UIUtils.CascadableResult>();
+            var sB = Event.NewStringBuilder();
+            try
+            {
+                string title = "{{W|Cherubim Viewer}}";
+                do
+                {
+                    sB.Clear()
+                        .Append("Below are the cherubim that generated for this world and which guard the tombs of its past sultans.")
+                        .AppendLine()
+                        .AppendLine().Append("Select one to view ");
+                    if (!Debug)
+                        sB.Append("it as though looking at it");
+                    else
+                        sB.Append("its GameObject \"Internals\"");
+                    sB.Append(".");
+
+                    if (abilityContext
+                        && !Options.EnableShowOnWorldGen)
+                        sB.AppendLine()
+                            .AppendLine().Append("{{K|Note: there are options available in the options menu to show this popup at world gen and when loading a save.}}");
+
+                    sB.AppendLineEnd();
+
+                    options.Clear(Dispose: true);
+
+                    foreach (var record in RelicTrackerSystem.CherubRecords)
+                    {
+                        options.Add(new PickOptionData<CherubRecord, Task<UIUtils.CascadableResult>>
+                        {
+                            Element = record,
+                            Text = !Debug ? record.ToString() : record.DebugString(),
+                            Hotkey = options.GetHotkeys().GetNextHotKey(),
+                            Icon = record.Cherub.RenderForUI("Look,Tooltip", AsIfKnown: true),
+                            Callback = e => Task.Run(() =>
+                            {
+                                InventoryActionEvent.Check(
+                                    Object: record.Cherub,
+                                    Actor: The.Player,
+                                    Item: record.Cherub,
+                                    Command: !Debug ? "Look" : "ShowInternals");
+                                return UIUtils.CascadableResult.Continue;
+                            })
+                        });
+                    }
+
+                    result = await UIUtils.PerformPickOptionAsync(
+                        OptionDataSet: options,
+                        Title: title,
+                        Intro: sB.ToString(),
+                        IntroIcon: RevealerIcon,
+                        NoBackButton: abilityContext,
+                        CancelIsExit: abilityContext,
+                        DefaultSelected: 0,
+                        OnBackCallback: UIUtils.BackSilentResultAsync,
+                        OnEscapeCallback: UIUtils.CancelSilentResultAsync);
+                }
+                while (result.IsContinue());
+            }
+            catch (Exception x)
+            {
+                Utils.Error($"{nameof(RevealCherubimAsync)} failed to get cached cherubim", x);
+                if (RethrowOnError)
+                    throw x;
+
+                result = UIUtils.CascadableResult.Back;
+            }
+            finally
+            {
+                Event.ResetTo(sB);
+            }
+
+            return result;
+        }
+
+        private UIUtils.CascadableResult RevealCherubim(
+            ref WishParams WishParams,
+            bool RethrowOnError = false,
+            string Context = null
+            )
+            => RevealCherubimAsync(
+                RelicTrackerSystem: this,
+                RethrowOnError: RethrowOnError,
+                ForceNoCherubim: WishParams.ForceNoCherubim,
+                Debug: WishParams.Debug,
+                Context: Context)
+            .WaitResult()
+            ;
+
+        public UIUtils.CascadableResult RevealCherubim(bool RethrowOnError = false, string Context = null)
+        {
+            WishParams wishParams = default;
+            return RevealCherubim(ref wishParams, RethrowOnError: RethrowOnError, Context: Context);
         }
 
         public bool ProcessZoneEvent(IZoneEvent E)
@@ -982,8 +1230,9 @@ namespace UD_Relic_Revealer.Mod
         {
             try
             {
-                if (!HasShown)
-                    Instance.RevealRelics();
+                if (!HasShown
+                    && Options.EnableShowOnWorldGen)
+                    Instance.AskRevealWhat();
             }
             finally
             {
@@ -1012,15 +1261,279 @@ namespace UD_Relic_Revealer.Mod
             return base.HandleEvent(E);
         }
 
+        private async Task<UIUtils.CascadableResult> AskRevealWhatAsync(
+            bool RethrowOnError = false,
+            bool ForceNoRelics = false,
+            bool ForceNoCherubim = false,
+            bool Debug = false,
+            string Context = null
+            )
+        {
+            var result = UIUtils.CascadableResult.Continue;
+
+            var sB = Event.NewStringBuilder();
+            using var options = new PickOptionDataSetAsync<RelicTrackerSystem, UIUtils.CascadableResult>();
+            try
+            {
+                string title = $"Relic Revealer".Colored("yellow");
+                do
+                {
+                    sB.Clear();
+                    options.Clear(Dispose: true);
+
+                    sB.AppendColored("Y", "Welcome to the Relic Tracker (and Cherubim Viewer)!")
+                        .AppendLine()
+                        .AppendLine().AppendQuote("{{Y|Track Relics}}").Append(" allows you to view the sultan relics and masks that have generated for this world, ")
+                            .Append("including those found in the sultan's reliquary in their tomb.")
+                        /*.AppendLine()
+                        .AppendBulletLine().AppendColored("W", "Reliquary relics").Append(" are generated when the zone the reliquary is in is first generated, instead of being ")
+                            .AppendColored("C", "cached").Append(" like those in ").AppendColored("C", "historic sites").Append(". Because of this, the ")
+                            .AppendQuote("final").Append(" relic may be different in some ways.")*/
+                        .AppendLine()
+                        .AppendLine()/*.AppendBulletLine()*/.Append("The tracker will keep tabs on whether or not you've ").AppendColored("G", "claimed").Append(" a given relic, who was ")
+                            .AppendColored("W", "last to hold it").Append(" if it's not in your possession, and whether the relic has been irrevocably ").AppendColored("r", "destroyed.")
+                        .AppendLine()
+                        .AppendLine().AppendQuote("{{Y|View Cherubim}}").Append(" displays a list of each of the type of cherubim that will be found guarding each of the sultan tombs. ")
+                            .Append("Selecting one will let you view it as though ").AppendColored("W", "l").Append("ooking at it, ")
+                            .Append("which will let you see the bonuses conferred to it by its ").AppendQuote("sultan theme").Append(".")
+                        .AppendLineEnd();
+
+                    options.Add(new()
+                    {
+                        Element = this,
+                        Text = "Track Relics",
+                        Icon = RelicsIcon,
+                        Hotkey = 'r',
+                        Callback = async e => (await RevealRelicsAsync(
+                            RelicTrackerSystem: e,
+                            RethrowOnError: RethrowOnError,
+                            ForceNoRelics: ForceNoRelics,
+                            Debug: Debug,
+                            Context: Context)).ContinueIfNotCancel(),
+                    });
+                    options.Add(new()
+                    {
+                        Element = this,
+                        Text = "View Cherubim",
+                        Icon = CherubBlueprints.GetRandomElementCosmetic().GetRenderable(),
+                        Hotkey = 'c',
+                        Callback = async e =>(await RevealCherubimAsync(
+                            RelicTrackerSystem: e,
+                            RethrowOnError: RethrowOnError,
+                            ForceNoCherubim: ForceNoCherubim,
+                            Debug: Debug,
+                            Context: Context)).ContinueIfNotCancel(),
+                    });
+
+
+                    bool wishContext = Context?.Contains("wish") is true;
+
+                    if (Options.EnableRelicRevealerActivatedAbility)
+                    {
+                        options.Add(new()
+                        {
+                            Element = this,
+                            Text = "I don't want the above options as activated abilities anymore".Color("K"),
+                            Callback = e => Task.Run(() =>
+                            {
+                                Options.EnableRelicRevealerActivatedAbility = false;
+                                return UIUtils.CascadableResult.Continue;
+                            }),
+
+                        });
+                    }
+                    else
+                    {
+                        options.Add(new()
+                        {
+                            Element = this,
+                            Text = "I want the above options as activated abilities".Color("K"),
+                            Callback = e => Task.Run(() =>
+                            {
+                                Options.EnableRelicRevealerActivatedAbility = true;
+                                return UIUtils.CascadableResult.Continue;
+                            }),
+
+                        });
+                    }
+
+                    if (!HasShown
+                        || wishContext)
+                    {
+                        if (Options.EnableShowOnWorldGen)
+                        {
+                            options.Add(new()
+                            {
+                                Element = this,
+                                Text = "Don't show this after world gen anymore".Color("K"),
+                                Callback = e => Task.Run(() =>
+                                {
+                                    Options.EnableShowOnWorldGen = false;
+                                    return UIUtils.CascadableResult.Continue;
+                                }),
+
+                            });
+                        }
+                        else
+                        {
+                            options.Add(new()
+                            {
+                                Element = this,
+                                Text = "Always show this after world gen".Color("K"),
+                                Callback = e => Task.Run(() =>
+                                {
+                                    Options.EnableShowOnWorldGen = true;
+                                    return UIUtils.CascadableResult.Continue;
+                                }),
+
+                            });
+                        }
+                    }
+
+                    if (HasShown
+                        || wishContext)
+                    {
+
+                        if (Options.EnableReshowOnGameLoad)
+                        {
+                            options.Add(new()
+                            {
+                                Element = this,
+                                Text = "Don't show this after loading a save anymore".Color("K"),
+                                Callback = e => Task.Run(() =>
+                                {
+                                    Options.EnableReshowOnGameLoad = false;
+                                    return UIUtils.CascadableResult.Continue;
+                                }),
+
+                            });
+                        }
+                        else
+                        {
+                            options.Add(new()
+                            {
+                                Element = this,
+                                Text = "Always show this after loading a save".Color("K"),
+                                Callback = e => Task.Run(() =>
+                                {
+                                    Options.EnableShowOnWorldGen = true;
+                                    Options.EnableReshowOnGameLoad = true;
+                                    return UIUtils.CascadableResult.Continue;
+                                }),
+
+                            });
+                        }
+                    }
+
+                    result = await UIUtils.PerformPickOptionAsync(
+                        OptionDataSet: options,
+                        Title: title,
+                        Intro: sB.ToString(),
+                        IntroIcon: RevealerIcon,
+                        NoBackButton: true,
+                        CancelIsExit: true,
+                        OnEscapeCallback: UIUtils.CancelSilentResultAsync);
+                }
+                while (result.IsContinue());
+
+            }
+            catch (Exception x)
+            {
+                Utils.Error($"Failed to ask player what they'd like to reveal", x);
+                return UIUtils.CascadableResult.Cancel;
+            }
+            finally
+            {
+                Event.ResetTo(sB);
+            }
+            return result;
+        }
+
+        private UIUtils.CascadableResult AskRevealWhat(ref WishParams WishParams, bool RethrowOnError = false, string Context = null)
+            => AskRevealWhatAsync(
+                RethrowOnError: RethrowOnError,
+                ForceNoRelics: WishParams.ForceNoRelics,
+                ForceNoCherubim: WishParams.ForceNoCherubim,
+                Debug: WishParams.Debug,
+                Context: Context)
+            .WaitResult()
+            ;
+
+        public UIUtils.CascadableResult AskRevealWhat(bool RethrowOnError = false, string Context = null)
+        {
+            WishParams wishParams = default;
+            return AskRevealWhat(ref wishParams, RethrowOnError: RethrowOnError, Context: Context);
+        }
+
         #region Wishes
 
-        [WishCommand(Command = "UD revealrelics")]
+        private ref struct WishParams
+        {
+            public bool ForceNoRelics;
+            public bool ForceNoCherubim;
+            public bool Debug;
+
+            public WishParams(string Parameters)
+            {
+                bool none = Parameters?.Contains("none") is true;
+                ForceNoRelics = none || Parameters?.Contains("no relics") is true;
+                ForceNoCherubim = none || Parameters?.Contains("no cherubim") is true;
+                Debug = Parameters?.Contains("debug") is true;
+            }
+        }
+
+        [WishCommand(Command = "UD AskReveal")]
+        public static bool AskReveal_WishHandler(string Parameters)
+        {
+            try
+            {
+                var wishParams = new WishParams(Parameters);
+                var result = Instance.AskRevealWhat(ref wishParams, RethrowOnError: true, Context: "wish");
+                return result.IsContinue()
+                    || result.IsSilent();
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        [WishCommand(Command = "UD AskReveal")]
+        public static bool AskReveal_WishHandler()
+            => AskReveal_WishHandler(null)
+            ;
+
+        [WishCommand(Command = "UD RevealRelics")]
+        public static bool RelicReveal_WishHandler(string Parameters)
+        {
+            try
+            {
+                var wishParams = new WishParams(Parameters);
+                var result = Instance.RevealRelics(ref wishParams, RethrowOnError: true, Context: "wish");
+                return result.IsContinue()
+                    || result.IsSilent();
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        [WishCommand(Command = "UD RevealRelics")]
         public static bool RelicReveal_WishHandler()
+            => RelicReveal_WishHandler(null)
+            ;
+
+        [WishCommand(Command = "UD RevealCherubim")]
+        [WishCommand(Command = "UD RevealCherubs")]
+        public static bool RevealCherubs_WishHandler(string Parameters)
         {
             try
             {
-                Instance.RevealRelics(RethrowOnError: true);
-                return true;
+                var wishParams = new WishParams(Parameters);
+                var result = Instance.RevealCherubim(ref wishParams, RethrowOnError: true, Context: "wish");
+                return result.IsContinue()
+                    || result.IsSilent();
             }
             catch
             {
@@ -1028,33 +1541,11 @@ namespace UD_Relic_Revealer.Mod
             }
         }
 
-        [WishCommand(Command = "UD revealrelics none")]
-        public static bool RelicReveal_None_WishHandler()
-        {
-            try
-            {
-                Instance.RevealRelics(RethrowOnError: true, ForceNoRelics: true);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        [WishCommand(Command = "UD revealrelics debug")]
-        public static bool RelicReveal_Debug_WishHandler()
-        {
-            try
-            {
-                Instance.RevealRelics(RethrowOnError: true, Debug: true);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
+        [WishCommand(Command = "UD RevealCherubim")]
+        [WishCommand(Command = "UD RevealCherubs")]
+        public static bool RevealCherubs_WishHandler()
+            => RevealCherubs_WishHandler(null)
+            ;
 
         #endregion
     }

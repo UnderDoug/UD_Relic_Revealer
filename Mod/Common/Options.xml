@@ -10,7 +10,7 @@
     <helptext>
       When enabled, after world generation has been completed and immediately before control is handed to you, the relic revealer will be displayed.
 
-      The default is {{w|Enabled}}.
+      The default is {{W|Enabled}}.
     </helptext>
   </option>
   

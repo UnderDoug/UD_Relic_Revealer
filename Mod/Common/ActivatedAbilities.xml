@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<activatedabilities>
+  <ability Command="UD_Relic_Revealer::RevealRelicsCmd">
+    <description>
+      <p>Peer into the aetheric sea to perfectly reveal the sultan relics of this world and track their whereabouts if you've encountered them before.</p>
+    </description>
+    <UITile Tile="Abilities/reveal_relics.png" Foreground="y" Detail="M" />
+  </ability>
+  <ability Command="UD_Relic_Revealer::RevealCherubimCmd">
+    <description>
+      <p>Peer into the aetheric sea to perfectly reveal the nature of this world's sultans' greatest protectors.</p>
+    </description>
+    <UITile Tile="Abilities/reveal_cherubim.png" Foreground="Y" Detail="W" />
+  </ability>
+</activatedabilities>

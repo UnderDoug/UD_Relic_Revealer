@@ -1,21 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 
 using ConsoleLib.Console;
 
-using HistoryKit;
-
-using Qud.API;
-using Qud.UI;
-
 using XRL;
-using XRL.Collections;
-using XRL.Language;
-using XRL.UI;
 using XRL.World;
-using XRL.World.Parts;
 
 using static UD_Relic_Revealer.Mod.Utils;
 
@@ -51,19 +40,26 @@ namespace UD_Relic_Revealer.Mod
                     if (BaseID <= 0
                         || !The.ZoneManager.CachedObjects.TryGetValue(BaseID.ToString(), out var cherub))
                     {
-                        cherub = GameObject.CreateUnmodified($"CherubimSpawn{Period}{Variant}");
-                        if (cherub != null)
-                            BaseID = int.Parse(The.ZoneManager.CacheObject(cherub, cacheTwiceOk: true, replaceIfAlreadyCached: true));
+                        string blueprint = GetBlueprint();
+                        if (GameObjectFactory.Factory.HasBlueprint(blueprint))
+                        {
+                            cherub = GameObject.CreateUnmodified(blueprint);
+                            if (cherub != null)
+                                BaseID = int.Parse(The.ZoneManager.CacheObject(cherub, cacheTwiceOk: true, replaceIfAlreadyCached: true));
 
-                        string statePrefix = $"cherubim";
-                        if (Variant == CherubVariant.B)
-                            statePrefix += ":";
-                        statePrefix += $"{Period}{Variant}";
+                            string statePrefix = $"cherubim";
+                            if (Variant == CherubVariant.B)
+                                statePrefix += ":";
+                            statePrefix += $"{Period}{Variant}";
 
-                        Faction = The.Game.GetObjectGameState($"{statePrefix}faction") as string;
-                        Element = The.Game.GetObjectGameState($"{statePrefix}element") as string;
+                            Faction = The.Game.GetObjectGameState($"{statePrefix}faction") as string;
+                            Element = The.Game.GetObjectGameState($"{statePrefix}element") as string;
+
+                            _Cherub = cherub;
+                        }
+                        else
+                            WarnOnce($"{nameof(CherubRecord)} failed to create record for {nameof(Period)} {Period} and {nameof(Variant)} {Variant}: {blueprint} is not a blueprint.");
                     }
-                    _Cherub = cherub;
                 }
                 return _Cherub;
             }
@@ -96,7 +92,7 @@ namespace UD_Relic_Revealer.Mod
 
         public static IEnumerable<KeyValuePair<int, CherubVariant>> GetCherubPeriodVariantPairs(
             int From = 1,
-            int To = 6,
+            int To = 5,
             CherubVariant? Variant = null
             )
         {
@@ -115,6 +111,14 @@ namespace UD_Relic_Revealer.Mod
                 yield return new(i, CherubVariant.B);
             }
         }
+
+        public static string GetBlueprint(int Period, CherubVariant Variant)
+            => $"CherubimSpawn{Period}{Variant}"
+            ;
+
+        public string GetBlueprint()
+            => GetBlueprint(Period, Variant)
+            ;
 
         public string PeriodString(bool Colored = true, bool WithVariant = false)
             => (!WithVariant
@@ -208,6 +212,10 @@ namespace UD_Relic_Revealer.Mod
             => Cherub != null
             ? $"[{PeriodString()}][{Variant}] {Cherub.DebugName}"
             : $"{ToString()} (MISSING_CHERUB)"
+            ;
+
+        public IRenderable GetRenderable()
+            => Cherub?.RenderForUI("Look,Tooltip")
             ;
 
         public int CompareTo(CherubRecord other)

@@ -6,14 +6,17 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-using UD_Relic_Revealer.Mod.UI;
-
 using XRL;
 using XRL.Collections;
 using XRL.Language;
 using XRL.World;
 using XRL.World.Capabilities;
 using XRL.World.Parts;
+using XRL.World.Text;
+using XRL.World.Text.Attributes;
+using ReplacerContext = XRL.World.Text.Delegates.DelegateContext;
+
+using UD_Relic_Revealer.Mod.UI;
 
 namespace UD_Relic_Revealer.Mod
 {
@@ -412,18 +415,91 @@ namespace UD_Relic_Revealer.Mod
             : Value
             ;
 
+        public static TAccumulate Aggregate<TAccumulate>(
+            this int Number,
+            TAccumulate seed,
+            Func<TAccumulate, int, TAccumulate> func
+            )
+        {
+            for (int i = 0; i < Number; i++)
+                seed = func(seed, i);
+
+            return seed;
+        }
+
+        public static string ThisManyTimes(this string @string, int Times = 1)
+            => Times.Aggregate("", (a, n) => a + @string)
+            ;
+
+        public static string ThisManyTimes(this char @char, int Times = 1)
+            => @char.ToString().ThisManyTimes(Times)
+            ;
+
+        public static string Indent(this int Amount, int Factor = 2, int MaxIndent = 12, bool NBSP = false)
+        {
+            if (!NBSP)
+                return Amount > 0
+                    ? " ".ThisManyTimes(Math.Min(Amount * Math.Max(1, Factor), MaxIndent * Factor))
+                    : null
+                    ;
+            else
+                return Amount > 0
+                    ? $"=ud_nbsp:{Math.Min(Amount * Math.Max(1, Factor), MaxIndent * Factor)}=".StartReplace().ToString()
+                    : null
+                    ;
+        }
+
+        [VariableReplacer]
+        public static string ud_nbsp(ReplacerContext Context)
+        {
+            string output = Utils.NBSP;
+            if (!Context.Parameters.IsNullOrEmpty()
+                && int.TryParse(Context.Parameters[0], out int count))
+                output = Utils.NBSP.ThisManyTimes(count);
+
+            return output;
+        }
+
         public static StringBuilder AppendLineEnd(this StringBuilder SB)
             => SB.AppendLine().Append("=ud_nbsp=".StartReplace().ToString())
             ;
 
+        public static TextBuilder AppendLineEnd(this TextBuilder TB)
+            => TB.AppendLine().Append("=ud_nbsp=".StartReplace().ToString())
+            ;
+
+        public static TextBuilder AppendRules(this TextBuilder TB, Action<TextBuilder> appender)
+        {
+            TB.Append("\n{{rules|");
+            appender(TB);
+            TB.Append("}}");
+            return TB;
+        }
+
+        public static TextBuilder AppendRules(this TextBuilder TB, string text)
+            => !text.IsNullOrEmpty()
+            ? TB.AppendLine().AppendColored("rules", text)
+            : TB
+            ;
+
         public static StringBuilder AppendRule(this StringBuilder SB, object Value)
-            => Value != null
+            => !(Value?.ToString()).IsNullOrEmpty()
             ? SB.AppendColored("rules", Value.ToString())
             : SB
             ;
 
+        public static TextBuilder AppendRule(this TextBuilder TB, object Value)
+            => !(Value?.ToString()).IsNullOrEmpty()
+            ? TB.AppendColored("rules", Value.ToString())
+            : TB
+            ;
+
         public static StringBuilder AppendQuote(this StringBuilder SB, object Value)
             => SB.Append("\"").Append(Value).Append("\"")
+            ;
+
+        public static TextBuilder AppendQuote(this TextBuilder TB, object Value)
+            => TB.Append("\"").Append(Value).Append("\"")
             ;
 
         public static StringBuilder AppendBullet(
@@ -445,6 +521,24 @@ namespace UD_Relic_Revealer.Mod
             string Color = null,
             string Bullet = "\u0007"
             )
-            => SB.AppendLine().AppendBullet(Color, Bullet);
+            => SB.AppendLine().AppendBullet(Color, Bullet)
+            ;
+
+
+        public static TextBuilder AppendIndent(this TextBuilder TB, int Amount = 0, int Factor = 2, int MaxIndent = 12, bool AsNBSP = false)
+            => TB.Append(Amount.Indent(Factor, MaxIndent, AsNBSP))
+            ;
+
+        public static TextBuilder AppendColored(this TextBuilder TB, string color, string text)
+            => TB.Append("{{").Append(color).Append("|")
+                .Append(text)
+                .Append("}}")
+            ;
+
+        public static string GetPlural(this bool IsPlural, string Singular, string Plural = null)
+            => IsPlural
+            ? Plural ?? Singular.Pluralize()
+            : Singular
+            ;
     }
 }

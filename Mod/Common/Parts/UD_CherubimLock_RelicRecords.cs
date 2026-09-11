@@ -1,14 +1,12 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 
 using UD_Relic_Revealer.Mod;
 
-using SerializeField = UnityEngine.SerializeField;
-
 namespace XRL.World.Parts
 {
+    /// <summary>
+    /// Extends <see cref="CherubimLock"/> to call <see cref="RelicTrackerSystem.ProcessRobberChimesTriggered"/> at the appropriate time.
+    /// </summary>
     [Serializable]
     public class UD_CherubimLock_RelicRecords : IPartExtension<CherubimLock>
     {

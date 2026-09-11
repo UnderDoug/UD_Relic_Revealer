@@ -1,14 +1,13 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 
 using UD_Relic_Revealer.Mod;
 
-using SerializeField = UnityEngine.SerializeField;
-
 namespace XRL.World.Parts
 {
+    /// <summary>
+    /// Helper part to ensure the <see cref="RelicTrackerSystem"/>'s cached <see cref="UD_Relic_Revealer.Mod.RelicRecord"/>s are synced with the relic <see cref="GameObject"/> across serialization/deserialization.
+    /// </summary>
     [Serializable]
     public class UD_RelicTracker : IScribedPart
     {
@@ -65,25 +64,19 @@ namespace XRL.World.Parts
             return copy;
         }
 
+        /// <remarks>
+        /// Checks the <paramref name="Source"/> for its original <see cref="RelicRecord"/> and, 
+        /// if <paramref name="CopyID"/> is <see langword="true"/> and the original <see cref="RelicRecord.IsExitingCache"/>, 
+        /// removes the original record from the <see cref="RelicTrackerSystem"/>.<br/>
+        /// If the <see cref="RelicTrackerSystem"/> is <see langword="null"/>, or <see cref="RelicRecord"/> is invalid, removes <see langword="this"/> from its <see cref="IPart.ParentObject"/>.
+        /// </remarks>
         public override void FinalizeCopyLate(GameObject Source, bool CopyEffects, bool CopyID, Func<GameObject, GameObject> MapInv)
         {
             base.FinalizeCopyLate(Source, CopyEffects, CopyID, MapInv);
 
-            /*Utils.Log($"{nameof(UD_RelicTracker)}.{nameof(FinalizeCopyLate)} for {ParentObject?.DebugName ?? "NO_OBJECT"}");*/
             var relicTrackerSystem = RelicTrackerSystem.Instance;
 
-            /*Utils.Log($"  {nameof(relicTrackerSystem)} not null: {relicTrackerSystem != null}");*/
-
             var originalRecord = Source.GetPart<UD_RelicTracker>()?.RelicRecord;
-
-            /*Utils.Log($"  {nameof(CopyID)}: {CopyID}");
-            Utils.Log($"  {nameof(originalRecord.IsExitingCache)}: {originalRecord?.IsExitingCache is true}");
-            Utils.Log($"  {nameof(relicTrackerSystem.CachedRelicRecords)}.{nameof(ICollection<RelicRecord>.Contains)}({nameof(originalRecord)}): {relicTrackerSystem?.CachedRelicRecords?.Contains(originalRecord) is true}");
-
-            (relicTrackerSystem?.CachedRelicRecords).IteratorSafe().Loggregate(
-                Proc: RelicRecord.DebugString,
-                Empty: "no records",
-                PostProc: s => $"    : {s}");*/
 
             if (CopyID
                 && originalRecord?.IsExitingCache is true)
@@ -92,14 +85,11 @@ namespace XRL.World.Parts
                 relicTrackerSystem?.RemoveRelic(originalRecord);
             }
 
-            bool? recorded = null;
             if (relicTrackerSystem == null
-                || ((recorded = relicTrackerSystem.TryRecordDuplicateRelic(ParentObject, originalRecord, out RelicRecord)) is not true)
+                || !relicTrackerSystem.TryRecordDuplicateRelic(ParentObject, originalRecord, out RelicRecord)
                 || RelicRecord == null
                 || RelicRecord.BaseID == 0)
             {
-                /*Utils.Log($"  {nameof(recorded)}: {recorded?.ToString() ?? "null"}");
-                Utils.Log($"  {nameof(RelicRecord)} not null: {RelicRecord != null}");*/
                 ParentObject.RemovePart(this);
                 return;
             }
@@ -113,6 +103,12 @@ namespace XRL.World.Parts
             base.Remove();
         }
 
+        /// <summary>
+        /// Assigns <paramref name="RelicRecord"/> to <see cref="RelicRecord"/> and aligns <see cref="TrackerID"/> with its <see cref="RelicRecord.TrackerID"/>. 
+        /// </summary>
+        /// <param name="RelicRecord">The record whose <see cref="RelicRecord.TrackerID"/> to align with.</param>
+        /// <param name="InitRecord">Whether or not <see cref="RelicRecord"/> should call <see cref="RelicRecord.Init"/> once assigned.</param>
+        /// <returns><see langword="this"/> if <paramref name="RelicRecord"/> is not <see langword="null"/>; otherwise, <br/><see langword="null"/></returns>
         public UD_RelicTracker Init(RelicRecord RelicRecord, bool InitRecord = false)
         {
             if (RelicRecord == null)
@@ -133,6 +129,9 @@ namespace XRL.World.Parts
             return this;
         }
 
+        /// <summary>
+        /// Sets <see cref="TrackerID"/> to <paramref name="TrackerID"/>, unregiestering and re-registering <see langword="this"/> from <see cref="RelicTrackerSystem._TrackersWantingRecords"/> where applicable.
+        /// </summary>
         public void SetTrackerID(Guid TrackerID)
         {
             bool registerTrackerForSync = false;

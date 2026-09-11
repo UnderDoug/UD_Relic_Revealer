@@ -1,18 +1,18 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 
 using ConsoleLib.Console;
 
-using UD_Relic_Revealer;
-using UD_Relic_Revealer.Mod;
-
 using XRL.UI;
+
+using UD_Relic_Revealer.Mod;
 
 using Options = UD_Relic_Revealer.Options;
 
 namespace XRL.World.Parts
 {
+    /// <summary>
+    /// Provides and manages activated abilities for the two main components of this mod: the relic tracking UI, and the cherubim viewing UI.
+    /// </summary>
     [Serializable]
     public class UD_Player_RelicRevealer : IPlayerPart
     {
@@ -26,6 +26,8 @@ namespace XRL.World.Parts
 
         private bool Silent;
 
+        public static bool HasShown;
+
         public UD_Player_RelicRevealer()
             : base()
         { }
@@ -33,11 +35,13 @@ namespace XRL.World.Parts
         public override void Write(GameObject Basis, SerializationWriter Writer)
         {
             Writer.WriteNamedFields(this, GetType());
+            Writer.Write(Silent);
         }
 
         public override void Read(GameObject Basis, SerializationReader Reader)
         {
             Reader.ReadNamedFields(this, GetType());
+            Silent = Reader.ReadBoolean();
         }
 
         public override void Attach()
@@ -61,29 +65,27 @@ namespace XRL.World.Parts
             if (RevealRelics_ActivatedAbilityID.IsEmptyOrDefault())
             {
                 RevealRelics_ActivatedAbilityID = AddMyActivatedAbility(
-                    Name: "Reveal Relics",
+                    Name: "Track Relics",
                     Command: RevealRelicsCommand,
                     Class: "Cheat",
-                    Description: "Peer into the aetheric sea to perfectly reveal the sultan relics of this world and track their whereabouts if you've encountered them before.",
+                    Description: null,
                     Icon: "R",
                     IsWorldMapUsable: true,
                     Silent: Silent,
-                    who: Who,
-                    UITileDefault: RevealerIcon);
+                    who: Who);
                 Silent = true;
             }
             if (RevealCherubim_ActivatedAbilityID.IsEmptyOrDefault())
             {
                 RevealCherubim_ActivatedAbilityID = AddMyActivatedAbility(
-                    Name: "Reveal Cherubim",
+                    Name: "View Cherubim",
                     Command: RevealCherubimCommand,
                     Class: "Cheat",
-                    Description: "Peer into the aetheric sea to perfectly reveal the nature of this worlds sultans' greatest protectors.",
+                    Description: null,
                     Icon: "C",
                     IsWorldMapUsable: true,
                     Silent: Silent,
-                    who: Who,
-                    UITileDefault: RevealerIcon);
+                    who: Who);
                 Silent = true;
             }
         }
@@ -97,6 +99,7 @@ namespace XRL.World.Parts
         public override bool WantEvent(int ID, int Cascade)
             => base.WantEvent(ID, Cascade)
             || ID == CommandEvent.ID
+            || (!HasShown && ID == BeforeTakeActionEvent.ID)
             ;
 
         public override bool HandleEvent(CommandEvent E)
@@ -126,6 +129,18 @@ namespace XRL.World.Parts
                         AfterRender: RelicTrackerSystem.NoRelicsIcon);
             }
 
+            return base.HandleEvent(E);
+        }
+
+        public override bool HandleEvent(BeforeTakeActionEvent E)
+        {
+            if (Options.EnableReshowOnGameLoad
+                && RelicTrackerSystem.Instance is RelicTrackerSystem relicTrackerSystem)
+            {
+                HasShown = true;
+                relicTrackerSystem.HasShown = true;
+                relicTrackerSystem.AskRevealWhat();
+            }
             return base.HandleEvent(E);
         }
     }

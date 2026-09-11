@@ -14,6 +14,6 @@
     <None Remove="obj\**" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Mod\Textures\" />
+    <Folder Include="Workshop Images\" />
   </ItemGroup>
 </Project>

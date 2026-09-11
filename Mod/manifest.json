@@ -1,9 +1,9 @@
 {
     "id": "UD_Relic_Revealer",
     "title": "Relic Revealer",
-    "description": "Adds a popup post-worldgen with a list of the sultan relics generated for the world with the ability to inspect them, and a wish to bring up the popup at any time.",
+    "description": "Adds two popup UIs for tracking a world's relics and viewing its cherubim.\n\nIncludes options to have the UI popup displayed immediately after world-gen, immediately after loading a save, and by use of two activated abilities (one each for relics and cherubim).\n\nWish for '{{Y|UD AskReveal}}' to display the base UI, or '{{Y|UD RevealRelics}}' or '{{Y|UD RevealCherubim}}' for the individual UIs.",
     "version": "0.0.1",
     "author": "{{K-g-G-Y-G-g-K alternation|UnderDoug}}",
-    "tags": "Quality of Life,Cheat",
+    "tags": "Cheat,Feature,Vanilla+,Quality of Life,QoL,Harmony",
     "PreviewImage": "preview.png"
 }

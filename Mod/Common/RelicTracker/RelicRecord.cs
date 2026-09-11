@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
 using ConsoleLib.Console;
@@ -19,6 +18,7 @@ using XRL.Language;
 using XRL.UI;
 using XRL.World;
 using XRL.World.Parts;
+using XRL.World.Text;
 
 using static UD_Relic_Revealer.Mod.Utils;
 
@@ -203,6 +203,9 @@ namespace UD_Relic_Revealer.Mod
         public string Story => _Story ??= Relic?.GetPropertyOrTag("Story");
 
         private string _LastHeldBy;
+        /// <summary>
+        /// DisplayName of the last <see cref="Holder"/>, provided it is a valid <see cref="GameObject"/>, is not pooled, and that <see langword="this"/> is not pinned.
+        /// </summary>
         public string LastHeldBy
         {
             get
@@ -221,6 +224,9 @@ namespace UD_Relic_Revealer.Mod
         }
 
         private bool _LastHeldByPlayer;
+        /// <summary>
+        /// Indicates whether the most recent valid <see cref="Holder"/> is <see cref="The.Player"/>.
+        /// </summary>
         public bool LastHeldByPlayer
         {
             get => _LastHeldByPlayer;
@@ -233,6 +239,9 @@ namespace UD_Relic_Revealer.Mod
         }
 
         private bool? _IsMask;
+        /// <summary>
+        /// Indicates whether <see cref="Relic"/> is a sultan mask.
+        /// </summary>
         public bool IsMask => _IsMask ??= (Relic?.HasPart(nameof(SultanMask)) is true);
 
         private int _ForReliquary;
@@ -242,9 +251,15 @@ namespace UD_Relic_Revealer.Mod
             protected set => _ForReliquary = value;
         }
 
+        /// <summary>
+        /// Indicates whether <see cref="Relic"/> is intended as loot for a sultan reliquary.
+        /// </summary>
         public bool IsForReliquary => ForReliquary > 0;
 
         private bool _IsClaimed;
+        /// <summary>
+        /// Indicates whether <see cref="Relic"/> has ever been in the possession of <see cref="The.Player"/>.
+        /// </summary>
         public bool IsClaimed
         {
             get => _IsClaimed;
@@ -252,6 +267,9 @@ namespace UD_Relic_Revealer.Mod
         }
 
         private bool _IsDestroyed;
+        /// <summary>
+        /// Indicates whether <see cref="Relic"/> has been destroyed in a way that should be tracked.
+        /// </summary>
         public bool IsDestroyed
         {
             get => _IsDestroyed;
@@ -263,39 +281,60 @@ namespace UD_Relic_Revealer.Mod
             }
         }
 
+        /// <summary>
+        /// Indicates whether <see cref="Relic"/> still exists in <see cref="The.ZoneManager.CachedObjects"/>.
+        /// </summary>
         public bool IsCached
             => Relic != null
             && (The.ZoneManager?.CachedObjects?.Values).IteratorSafe().Any(go => go == Relic)
             ;
 
+        /// <summary>
+        /// Indicates whether <see cref="Relic"/> will be removed from <see cref="The.ZoneManager.CachedObjects"/> when the <see cref="Zone"/> it's intended for is built.
+        /// </summary>
         public bool IsExitingCache
             => Relic == null
             || The.ZoneManager?.CachedObjectsToRemoveAfterZoneBuild?.Contains(Relic.ID) is true
             ;
 
+        /// <summary>
+        /// Indicates whether <see cref="Relic"/> is remaining cached or is displayable.
+        /// </summary>
         public bool IsValidRecord
             => IsRemainingCached
             || HasDisplayableRelic
             ;
 
+        /// <summary>
+        /// Indicates whether <see cref="Relic"/> is currently cached, is not exiting cache, and this record is valid.
+        /// </summary>
         public bool IsRemainingCached
             => IsCached
             && !IsExitingCache
             && IsValid
             ;
 
+        /// <summary>
+        /// Indicates whether <see cref="Relic"/> is a valid <see cref="GameObject"/>, that is not pooled, and has a non-default BaseID.
+        /// </summary>
         public bool HasRealRelic
             => GameObject.Validate(Relic)
             && !Relic.IsPooled()
             && BaseID != 0
             ;
 
+        /// <summary>
+        /// Indicates whether this record is for a destroyed relic, a pinned relic, or a reliquary relic. All of these rely on cached display values, and <see cref="Relic"/> is likely <see langword="null"/>, pooled, or an invalid <see cref="GameObject"/>.
+        /// </summary>
         public bool HasPseudoRelic
             => IsDestroyed
             || IsPinned()
             || ForReliquary > 0
             ;
 
+        /// <summary>
+        /// Indicates whether this record contains the minimum data necessary to display a mocked-up "look UI" for the relic it is intended to represent.
+        /// </summary>
         public bool HasDisplayableRelic
             => (HasRealRelic
                 || HasPseudoRelic)
@@ -303,19 +342,38 @@ namespace UD_Relic_Revealer.Mod
             && IsValid
             ;
 
+        /// <summary>
+        /// Flag to indicate whether this record is the one that <see cref="RelicTrackerSystem"/> has cached. Deserialization results in duplicate records which this flag assists in cleaning up.
+        /// </summary>
         private bool _Synched;
 
+        /// <summary>
+        /// Flag to prevent most changes to this record, and to prevent it being removed from the <see cref="RelicTrackerSystem"/>.
+        /// </summary>
         private bool _Pinned;
 
+        /// <summary>
+        /// Flag to manually indicate that this relic is no longer valid, should not be displayed, and will be imminently disposed. Can only be overridden by <see cref="_Pinned"/>.
+        /// </summary>
         private bool _Valid = true;
 
+        /// <summary>
+        /// Indicates that this record is either flagged valid or is currently pinned.
+        /// </summary>
         private bool IsValid
             => _Valid
             || IsPinned()
             ;
 
+        /// <summary>
+        /// The current holder of <see cref="Relic"/>.
+        /// </summary>
         public GameObject Holder => Relic?.Holder;
 
+
+        /// <summary>
+        /// Indicates whether <see cref="Relic"/> is in the currently active zone.
+        /// </summary>
         public bool IsInCurrentZone
             => The.ActiveZone != null
             && The.ActiveZone == (Relic?.CurrentZone ?? Relic?.InInventory?.CurrentZone)
@@ -695,7 +753,7 @@ namespace UD_Relic_Revealer.Mod
 
             bool currentlyPlayerHeld = Holder?.IsPlayer() is true;
 
-            var sBDesc = Event.NewStringBuilder(Description);
+            using var tBDesc = TextBuilder.Get(Description);
             using var elements = ScopeDisposedList<StringPair>.GetFromPool();
             if (IsClaimed)
             {
@@ -739,13 +797,13 @@ namespace UD_Relic_Revealer.Mod
                     elements.Add(new(null, "in an {{r|unknown}} last locaiton"));
 
                 if (elements.IsNullOrEmpty())
-                {
                     elements.Add(new("have", "become {{r|untethered from reality}}"));
-                }
             }
 
-            sBDesc.AppendRules("-----").AppendLine()
-                .Append(IndicativeProximal).Append(" ").Append(IsPlural ? "relics" : "relic").Append(" ")
+            tBDesc.AppendRules("-----")
+                .AppendLine().Append("Sultan era: ").AppendColored("", GetEraDisplayString() ?? "{{R|?}}")
+                .AppendLine().Append("Tier: ").AppendColored("C", Tier.ToString())
+                .AppendLine().Append(IndicativeProximal).Append(" ").Append(IsPlural.GetPlural("relic")).Append(" ")
                 .Append(Grammar.MakeAndList(
                     Words: elements.Aggregate(
                         seed: new List<string>(),
@@ -758,30 +816,32 @@ namespace UD_Relic_Revealer.Mod
                 .Append(".");
 
             if (IsDestroyed)
-                sBDesc.AppendLine()
-                    .Append(IndicativeProximal).Append(" ").Append(IsPlural ? "relics" : "relic").Append(" ")
+                tBDesc.AppendLine()
+                    .Append(IndicativeProximal).Append(" ").Append(IsPlural.GetPlural("relic")).Append(" ")
                     .Append(@is).Append(" ").AppendColored("r", "no more").Append("; ")
-                    .Append(it).Append(" ").Append(IsPlural ? "have" : "has").Append(" been irrevocably lost.");
+                    .Append(it).Append(" ").Append(IsPlural.GetPlural("has", "have")).Append(" been irrevocably lost.");
 
             if (ForReliquary > 0
                 && !IsDestroyed)
-                sBDesc.AppendLine().AppendLine()
+                tBDesc.AppendLine().AppendLine()
                     .AppendColored("C", "Please note:").Append(" due to being generated when the reliquary is first loaded, ")
-                    .Append(indicativeProximal).Append(" ").Append(IsPlural ? "relics" : "relic").Append(" may ")
+                    .Append(indicativeProximal).Append(" ").Append(IsPlural.GetPlural("relic")).Append(" may ")
                     .AppendColored("W", "vary slightly").Append(" compared to what is presented above.")
                     .AppendLine()
                     .AppendColored("K", "Care has been taken to reduce these variations as much as possible.");
 
             if (Internals
                 && Relic != null)
-                sBDesc
+                tBDesc
                     .AppendLine()
                     .AppendLine()
                     .Append(GetDebugInternalsEvent.GetFor(Relic));
 
-            var sBName = Event.NewStringBuilder(DisplayName)
-                .Append('\n')
-                .AppendColored("C", $": Tier {Tier} :");
+            using var tBName = TextBuilder.Get()
+                .Append(DisplayName)
+                // .AppendLine()
+                // .AppendColored("C", $": Tier {Tier} :")
+                ;
 
             var buttons = new List<QudMenuItem>(PopupMessage.SingleButton);
 
@@ -794,9 +854,9 @@ namespace UD_Relic_Revealer.Mod
                 });
 
             if ((await Popup.NewPopupMessageAsync(
-                    message: sBDesc.ToString(),
+                    message: tBDesc.ToString(),
                     buttons: buttons,
-                    contextTitle: sBName.ToString(),
+                    contextTitle: tBName.ToString(),
                     contextRender: Render)
                 ).command == "Story")
             {

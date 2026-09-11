@@ -1,28 +1,26 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
+using System.Threading.Tasks;
 
 using ConsoleLib.Console;
 
 using HistoryKit;
 
 using Qud.API;
-using Qud.UI;
 
 using XRL;
 using XRL.Collections;
 using XRL.Language;
+using XRL.World.Text;
 using XRL.UI;
 using XRL.Wish;
 using XRL.World;
 using XRL.World.Parts;
+using static XRL.World.Parts.ActivatedAbilities;
 
 using UD_Relic_Revealer.Mod.Events;
 using UD_Relic_Revealer.Mod.UI;
-
-using SerializeField = UnityEngine.SerializeField;
-using System.Threading.Tasks;
 
 namespace UD_Relic_Revealer.Mod
 {
@@ -59,41 +57,22 @@ namespace UD_Relic_Revealer.Mod
 
         public static IRenderable MissingIcon = new Renderable(
             Tile: "Mutations/amnesia.bmp",
-            ColorString: $"&K",
-            TileColor: $"&K",
+            ColorString: $"&k",
+            TileColor: $"&k",
             DetailColor: 'B');
 
-        private static IRenderable _RevealerIcon;
-        public static IRenderable RevealerIcon
-        {
-            get
-            {
-                if (_RevealerIcon == null)
-                {
-                    if (GameObjectFactory.Factory is not GameObjectFactory factory
-                        || factory.GetBlueprintIfExists("Telescopic Monocle")?.GetRenderable() is not IRenderable telescopicMonocleRender)
-                        return MissingIcon;
-                    _RevealerIcon = telescopicMonocleRender;
-                }
-                return _RevealerIcon;
-            }
-        }
+        public static IRenderable RevealerIcon = new Renderable(
+            Tile: "revealer_popup.png",
+            ColorString: $"&Y",
+            TileColor: $"&Y",
+            DetailColor: 'B');
 
         private static IRenderable _RelicsIcon;
         public static IRenderable RelicsIcon
-        {
-            get
-            {
-                if (_RelicsIcon == null)
-                {
-                    if (GameObjectFactory.Factory is not GameObjectFactory factory
-                        || factory.GetBlueprintIfExists("The Kesil Face")?.GetRenderable() is not IRenderable kesilFaceRender)
-                        return MissingIcon;
-                    _RelicsIcon = kesilFaceRender;
-                }
-                return _RelicsIcon;
-            }
-        }
+            => (_RelicsIcon ??= XmlData.DataByCommand.GetValueOrDefault(UD_Player_RelicRevealer.RevealRelicsCommand)?.UITiles?.GetValueOrDefault(XmlData.UITileStates.Default)
+                ?? GameObjectFactory.Factory?.GetBlueprintIfExists("The Kesil Face")?.GetRenderable())
+            ?? MissingIcon
+            ;
 
         private static List<GameObjectBlueprint> _CherubBlueprints;
         public static IEnumerable<GameObjectBlueprint> CherubBlueprints
@@ -111,6 +90,10 @@ namespace UD_Relic_Revealer.Mod
                 return _CherubBlueprints;
             }
         }
+        public static IRenderable CherubimIcon
+            => XmlData.DataByCommand.GetValueOrDefault(UD_Player_RelicRevealer.RevealCherubimCommand)?.UITiles?.GetValueOrDefault(XmlData.UITileStates.Default)
+            ?? CherubBlueprints.GetRandomElementCosmetic().GetRenderable()
+            ;
 
         public static Comparison<RelicRecord> EraTierComparison = delegate (RelicRecord x, RelicRecord y)
         {
@@ -208,17 +191,13 @@ namespace UD_Relic_Revealer.Mod
 
         protected bool ProcessedRobberChimesTriggered;
 
+        protected bool ZoneWantsProcessing;
+
         public RelicTrackerSystem()
         { }
 
-        private static RelicTrackerSystem InitializeSystem(bool Silent)
+        private static RelicTrackerSystem InitializeSystem()
         {
-            if (!Silent)
-            {
-                Utils.Log($"{nameof(RelicTrackerSystem)}.{nameof(InitializeSystem)} Called...");
-                Utils.Log($"  constructing new {nameof(RelicTrackerSystem)}...");
-            }
-
             if (LastGameID.IsNullOrEmpty()
                 || The.Game?.GameID != LastGameID)
             {
@@ -230,31 +209,16 @@ namespace UD_Relic_Revealer.Mod
             return new();
         }
 
-        private static RelicTrackerSystem InitializeSystem() => InitializeSystem(Silent: true);
-
         [CallAfterGameLoaded]
         public static void AfterGameLoaded()
         {
             RelicTrackerSystemInit(WorldGen: false);
-
-            if (Options.EnableReshowOnGameLoad
-                && Instance?.HasShown is true)
-                Instance.AskRevealWhat();
-        }
-
-        [GameBasedCacheInit]
-        public static void RelicTrackerGameBasedCacheInit()
-        {
-            /*Utils.Info($"{nameof(RelicTrackerSystem)}.{nameof(RelicTrackerGameBasedCacheInit)}...");
-            Utils.Log($"  {{{The.Game?.GameID}}} - {nameof(The)}.{nameof(The.Game)}.{nameof(The.Game.GameID)}");
-            Utils.Log($"  {{{LastGameID ?? Guid.Empty.ToString()}}} - {nameof(RelicTrackerSystem)}.{nameof(LastGameID)}");
-            Utils.Log($"  {{{_Instance?.GameID ?? Guid.Empty.ToString()}}} - {nameof(Instance)}.{nameof(GameID)}");*/
+            UD_Player_RelicRevealer.HasShown = false;
         }
 
         public static void RelicTrackerSystemInit(bool WorldGen)
         {
             Utils.Info($"{nameof(RelicTrackerSystem)}.{nameof(RelicTrackerSystemInit)}({nameof(WorldGen)}: {WorldGen}) Called...");
-
             if (The.Game == null)
             {
                 Utils.Info($"{nameof(The)}.{nameof(The.Game)} is null.");
@@ -280,13 +244,12 @@ namespace UD_Relic_Revealer.Mod
             if (_Instance != null)
             {
                 Utils.Info($"{nameof(Instance)} {(!_Instance.Initialized ? "constructed" : "loaded")} and assigned!");
-                // Loading.LoadTask($"Tracking Relics", Instance.Init, showToUser: false); // show to user once this does something (if it ever does)
-                if (_Instance.Initialized)
+                /*if (_Instance.Initialized)
                     _Instance.ViewableRelicRecords.Loggregate(
                         Proc: RelicRecord.DebugString,
                         Empty: "no records",
                         PostProc: s => $"  : {s}")
-                        ;
+                        ;*/
             }
             else
                 Utils.Error($"Failed to load {nameof(RelicTrackerSystem)}.");
@@ -301,6 +264,7 @@ namespace UD_Relic_Revealer.Mod
         {
             if (!Silent)
                 Utils.Log($"{nameof(RelicTrackerSystem)}.{nameof(TrackRelics)}, {nameof(Initialized)}: {Initialized}");
+
             if (!Initialized)
             {
                 _CachedRelicRecords ??= new(64);
@@ -319,22 +283,18 @@ namespace UD_Relic_Revealer.Mod
 
                 Initialized = !ViewableRelicRecords.IsNullOrEmpty();
 
-                if (Initialized)
-                {
-                    if (!Silent)
-                        Utils.Log($"  Initialization Succeeded...");
-                }
-                else
-                {
-                    if (!Silent)
-                        Utils.Log($"  Initialization Failed...");
-                }
-
                 if (!Silent)
-                    ViewableRelicRecords.Loggregate(
+                {
+                    if (Initialized)
+                        Utils.Log($"  Initialization Succeeded...");
+                    else
+                        Utils.Log($"  Initialization Failed...");
+
+                    /*ViewableRelicRecords.Loggregate(
                         Proc: RelicRecord.DebugString,
                         Empty: "no records",
-                        PostProc: s => $"    : {s}");
+                        PostProc: s => $"    : {s}");*/
+                }
             }
             else
             {
@@ -372,18 +332,15 @@ namespace UD_Relic_Revealer.Mod
                 Writer.WriteComposite(relicRecord);
 
             Writer.Write(ProcessedRobberChimesTriggered);
+            Writer.Write(ZoneWantsProcessing);
         }
 
         public override void Read(SerializationReader Reader)
         {
-            Utils.Log($"{nameof(RelicTrackerSystem)}.{nameof(Read)}");
-            Utils.Log($"  {nameof(SerializationReader)}.{nameof(SerializationReader.ReadNamedFields)}");
             Reader.ReadNamedFields(this, GetType());
 
-            Utils.Log($"  {nameof(GameID)}");
             GameID = Reader.ReadOptimizedString();
 
-            Utils.Log($"  {nameof(_CachedRelicRecords)}");
             int count = Reader.ReadOptimizedInt32();
             if (count >= 0)
             {
@@ -395,16 +352,12 @@ namespace UD_Relic_Revealer.Mod
                     count--;
                 }
             }
-
-            Utils.Log($"  {nameof(ProcessedRobberChimesTriggered)}");
             ProcessedRobberChimesTriggered = Reader.ReadBoolean();
-
-            Utils.Log($"  Read Complete!");
+            ZoneWantsProcessing = Reader.ReadBoolean();
         }
 
         public override void AfterLoad(XRLGame game)
         {
-            Utils.Log($"{nameof(RelicTrackerSystem)}.{nameof(AfterLoad)}");
             base.AfterLoad(game);
 
             var existingSystem = game.GetSystem<RelicTrackerSystem>();
@@ -420,16 +373,11 @@ namespace UD_Relic_Revealer.Mod
                 game.AddSystem(this);
             }
 
-            Utils.Log($"  {nameof(_Instance)} = this");
             _Instance = this;
 
-            Utils.Log($"  {nameof(SyncRelics)}");
             SyncRelics();
 
-            Utils.Log($"  Requiring {nameof(UD_Player_RelicRevealer)}");
             The.Player?.RequirePart<UD_Player_RelicRevealer>();
-
-            Utils.Log($"  Load Complete!");
         }
 
         #endregion
@@ -437,6 +385,9 @@ namespace UD_Relic_Revealer.Mod
         public static bool IsRelic(GameObject Object, int ForReliquary = 0)
         {
             if (Object.GetPropertyOrTag($"{Utils.MOD_ID}.{nameof(RelicTrackerSystem)}.ExcludeRelic", $"{false}").EqualsNoCase($"{true}"))
+                return false;
+
+            if (Object.IsTemporary)
                 return false;
 
             if (Object.HasPart(nameof(SultanMask)))
@@ -476,23 +427,15 @@ namespace UD_Relic_Revealer.Mod
 
         public IEnumerable<RelicRecord> GenerateReliquaryRecords()
         {
-            // Utils.Log($"{nameof(RelicTrackerSystem)}.{nameof(GetReliquaryRelics)}...");
             SultanLoot sultanLoot = new();
             for (int i = 6; i > 0; i--)
             {
-                // Utils.Log($"  Sultan Period {i}:");
                 sultanLoot.Period = i;
                 if (NewRelicRecord(sultanLoot.generateFace(), ForReliquary: i) is RelicRecord maskRecord)
-                {
-                    // Utils.Log($"      : {relicRecord.DebugString()}");
                     yield return maskRecord;
-                }
-                /*else
-                    Utils.Log($"      : failed to make record");*/
 
                 foreach (string id in (HistoryAPI.GetSultanForPeriod(i)?.GetList("items")).IteratorSafe())
                 {
-                    // Utils.Log($"    {nameof(id)}: {id}");
                     if (The.Game.sultanHistory.GetEntitiesByDelegate(e => e.GetCurrentSnapshot().Name == id).FirstOrDefault() is not HistoricEntity relicEntity)
                         continue;
 
@@ -502,15 +445,9 @@ namespace UD_Relic_Revealer.Mod
                     if (RelicGenerator.GenerateRelic(relicSnapshot, RelicGenerator.GetRelicTierFromPeriod(int.Parse(relicSnapshot.GetProperty("period")))) is not GameObject relic)
                         continue;
 
-                    // Utils.Log($"      : {relic.DebugName ?? "NO_RELIC"}");
-
                     if (NewRelicRecord(relic, ForReliquary: i) is not RelicRecord relicRecord)
-                    {
-                        // Utils.Log($"      : failed to make record");
                         continue;
-                    }
 
-                    // Utils.Log($"      : {relicRecord.DebugString()}");
                     yield return relicRecord;
                 }
             }
@@ -531,18 +468,7 @@ namespace UD_Relic_Revealer.Mod
                 {
                     Relics.Add(relicRecord);
                     if (relicRecord.IsMask)
-                    {
                         Masks.Add(relicRecord);
-                        Utils.Log($"    added (mask): {relicRecord.DebugString()}");
-                    }
-                    else
-                    {
-                        Utils.Log($"    added: {relicRecord.DebugString()}");
-                    }
-                }
-                else
-                {
-                    Utils.Log($"    already exists: {relicRecord.DebugString()}");
                 }
             }
         }
@@ -551,35 +477,20 @@ namespace UD_Relic_Revealer.Mod
         {
             using var relics = ScopeDisposedList<RelicRecord>.GetFromPool();
             using var masks = ScopeDisposedList<RelicRecord>.GetFromPool();
-            Utils.Log($"{nameof(RelicTrackerSystem)}.{nameof(GenerateOrderedRecords)}...");
-            Utils.Log($"  {nameof(GenerateZoneCacheRecords)}...");
+
             AddRecordsIfNone(GenerateZoneCacheRecords(), relics, masks);
-
-            Utils.Log($"  {nameof(GenerateReliquaryRecords)}...");
             AddRecordsIfNone(GenerateReliquaryRecords(), relics, masks);
-
-            Utils.Log($"  {nameof(GenerateZoneRecords)}...");
             AddRecordsIfNone(GenerateZoneRecords(), relics, masks);
 
-            Utils.Log($"  {nameof(relics)}.StableSortInPlace...");
             relics.StableSortInPlace(EraTierComparison);
 
-            Utils.Log($"  Remove mask duplicates...");
             foreach (var maskRecord in masks.IteratorSafe())
             {
                 if (!maskRecord.IsForReliquary)
                 {
-                    Utils.Log($"    not for reliquary: {maskRecord.DebugString()}");
-                    var relicsToRemove = relics.Where(r => r.IsMask && r.ForReliquary == maskRecord.Era && r.RelicName == maskRecord.RelicName);
+                    var relicsToRemove = relics.Where(r => r.IsMask && !r.IsDestroyed && r.ForReliquary == maskRecord.Era && r.RelicName == maskRecord.RelicName);
                     foreach (var relicToRemove in relicsToRemove)
-                    {
-                        Utils.Log($"      removing like mask: {relicToRemove.DebugString()}");
                         relics.Remove(relicToRemove);
-                    }
-                }
-                else
-                {
-                    Utils.Log($"    is for reliquary: {maskRecord.DebugString()}");
                 }
             }
 
@@ -663,17 +574,14 @@ namespace UD_Relic_Revealer.Mod
 
         public bool SyncRelicRecord(ref RelicRecord RelicRecord, UD_RelicTracker RelicTracker)
         {
-            Utils.Log($"{nameof(RelicTrackerSystem)}.{nameof(SyncRelicRecord)} for {RelicTracker?.ParentObject?.DebugName ?? "NO_RELIC"}...");
             if (_CachedRelicRecords.IsNullOrEmpty())
             {
-                Utils.Log($"  {nameof(_CachedRelicRecords)} is null, recording tracker in want of record...");
                 RegisterTrackerForSync(RelicTracker);
                 return false;
             }
 
             if (!_CachedRelicRecords.TryGetValue(RelicTracker.TrackerID, out RelicRecord))
             {
-                Utils.Log($"  {nameof(_CachedRelicRecords)} doesn't contain TrackerID {{{RelicTracker.TrackerID}}}, recording tracker in want of record...");
                 RegisterTrackerForSync(RelicTracker);
                 return false;
             }
@@ -686,20 +594,9 @@ namespace UD_Relic_Revealer.Mod
 
         public void SyncRelics()
         {
-            Utils.Log($"{nameof(RelicTrackerSystem)}.{nameof(SyncRelics)}...");
-
             using var relicRecords = RentRecords();
             using var relicTrackers = ScopeDisposedList<UD_RelicTracker>.GetFromPoolFilledWith(_TrackersWantingRecords.Keys);
 
-            Utils.Log($"  {nameof(RelicRecords)} before...");
-            /*PinAllRecordsWhile(delegate ()
-            {*/
-                RelicRecords.Loggregate(
-                    Proc: RelicRecord.DebugString,
-                    Empty: "no records",
-                    PostProc: s => $"    : {s}");
-            /*});*/
-            
             foreach (var relicTracker in relicTrackers)
                 if (!_TrackersWantingRecords.TryGetValue(relicTracker, out var trackerID)
                     || !SyncRelicRecord(ref relicTracker.RelicRecord, relicTracker))
@@ -714,15 +611,6 @@ namespace UD_Relic_Revealer.Mod
             }
 
             ClearInvalid();
-
-            Utils.Log($"  {nameof(RelicRecords)} after...");
-            /*PinAllRecordsWhile(delegate ()
-            {*/
-                RelicRecords.Loggregate(
-                    Proc: RelicRecord.DebugString,
-                    Empty: "no records",
-                    PostProc: s => $"    : {s}");
-            /*});*/
         }
 
         public void PinAllRecordsWhile(Action Action)
@@ -805,7 +693,7 @@ namespace UD_Relic_Revealer.Mod
                     {
                         try
                         {
-                            using (var recordsToRemove = RentRecords(r => r.IsMask && r.ForReliquary == realMask.Era && r.RelicName == realMask.RelicName))
+                            using (var recordsToRemove = RentRecords(r => r.IsMask && !r.IsDestroyed && r.ForReliquary == realMask.Era && r.RelicName == realMask.RelicName))
                             {
                                 foreach (var recordToRemove in recordsToRemove)
                                 {
@@ -864,11 +752,13 @@ namespace UD_Relic_Revealer.Mod
 
             using var relics = RelicTrackerSystem.RentRecords(IsEligibleToShow, EraTierComparison);
 
+            int worldSeed = The.Game.GetWorldSeed();
+
             if (relics.IsNullOrEmpty()
                 || ForceNoRelics)
             {
                 await Popup.NewPopupMessageAsync(
-                    message: $"There don't appear to be any relic records.{(ForceNoRelics && !relics.IsNullOrEmpty() ? "\n\n{{K|This is the result of the ForceNoRelics flag.}}" : null)}",
+                    message: $"There don't appear to be any relic records.\n\nThe world seed is {worldSeed.ToString().Color("c")}.{(ForceNoRelics && !relics.IsNullOrEmpty() ? "\n\n{{K|This is the result of the ForceNoRelics flag.}}" : null)}",
                     title: "{{R|No Relics}}",
                     afterRender: NoRelicsIcon
                 );
@@ -878,27 +768,29 @@ namespace UD_Relic_Revealer.Mod
             var result = UIUtils.CascadableResult.BackSilent;
 
             using var options = new PickOptionDataSetAsync<RelicRecord, UIUtils.CascadableResult>();
-            var sB = Event.NewStringBuilder();
+            using var tB = TextBuilder.Get();
             try
             {
                 string title = "{{W|Relic Tracker}}" + (Debug ? "{{W| ({{B|Debug Edition}})}}" : null);
                 do
                 {
-                    sB.Clear()
+                    tB.Clear()
                         .Append("Below are the relics that generated for this world.")
                         .AppendLine()
                         .AppendLine().Append("Select one to view it as though looking at it");
                     if (Debug)
-                        sB.Append(", including its internals if the GameObject is still present");
+                        tB.Append(", including its internals if the GameObject is still present");
+                    tB.Append(".");
 
-                    sB.Append(".");
+                    tB.AppendLine()
+                        .AppendLine().Append($"The world seed is ").AppendColored("C", worldSeed.ToString()).Append(".");
 
                     if (abilityContext
                         && !Options.EnableShowOnWorldGen)
-                        sB.AppendLine()
-                            .AppendLine().Append("{{K|Note: there are options available in the options menu to show this popup at world gen and when loading a save.}}");
+                        tB.AppendLine()
+                            .AppendLine().AppendColored("K", "Note: there are options available in the options menu to show this popup at world gen and when loading a save.");
 
-                    sB.AppendLineEnd();
+                    tB.AppendLineEnd();
 
                     options.Clear(Dispose: true);
 
@@ -917,10 +809,10 @@ namespace UD_Relic_Revealer.Mod
                     result = await UIUtils.PerformPickOptionAsync(
                         OptionDataSet: options,
                         Title: title,
-                        Intro: sB.ToString(),
-                        IntroIcon: RevealerIcon,
+                        Intro: tB.ToString(),
+                        IntroIcon: RelicsIcon,
                         NoBackButton: abilityContext,
-                        CancelIsExit: abilityContext,
+                        CancelIsExit: true,
                         DefaultSelected: 0,
                         OnBackCallback: UIUtils.BackSilentResultAsync,
                         OnEscapeCallback: UIUtils.CancelSilentResultAsync);
@@ -934,10 +826,6 @@ namespace UD_Relic_Revealer.Mod
                     throw x;
 
                 result = UIUtils.CascadableResult.Back;
-            }
-            finally
-            {
-                Event.ResetTo(sB);
             }
 
             return result;
@@ -973,12 +861,14 @@ namespace UD_Relic_Revealer.Mod
         {
             bool abilityContext = Context?.Contains("ability") is true;
 
+            int worldSeed = The.Game.GetWorldSeed();
+
             if (RelicTrackerSystem.CherubRecords is not IEnumerable<CherubRecord> cherubRecords
                 || cherubRecords.IsNullOrEmpty()
                 || ForceNoCherubim)
             {
                 await Popup.NewPopupMessageAsync(
-                    message: $"There don't appear to be any cherubim records.{(ForceNoCherubim ? "\n\n{{K|This is the result of the ForceNoCherubim flag.}}" : null)}",
+                    message: $"There don't appear to be any cherubim records.\n\nThe world seed is {worldSeed.ToString().Color("c")}.{(ForceNoCherubim ? "\n\n{{K|This is the result of the ForceNoCherubim flag.}}" : null)}",
                     title: "{{R|No Cherubim}}",
                     afterRender: NoRelicsIcon
                 );
@@ -988,28 +878,31 @@ namespace UD_Relic_Revealer.Mod
             var result = UIUtils.CascadableResult.BackSilent;
 
             using var options = new PickOptionDataSetAsync<CherubRecord, UIUtils.CascadableResult>();
-            var sB = Event.NewStringBuilder();
+            using var tB = TextBuilder.Get();
             try
             {
                 string title = "{{W|Cherubim Viewer}}";
                 do
                 {
-                    sB.Clear()
+                    tB.Clear()
                         .Append("Below are the cherubim that generated for this world and which guard the tombs of its past sultans.")
                         .AppendLine()
                         .AppendLine().Append("Select one to view ");
                     if (!Debug)
-                        sB.Append("it as though looking at it");
+                        tB.Append("it as though looking at it");
                     else
-                        sB.Append("its GameObject \"Internals\"");
-                    sB.Append(".");
+                        tB.Append("its GameObject \"Internals\"");
+                    tB.Append(".");
+
+                    tB.AppendLine()
+                        .AppendLine().Append($"The world seed is ").AppendColored("C", worldSeed.ToString()).Append(".");
 
                     if (abilityContext
                         && !Options.EnableShowOnWorldGen)
-                        sB.AppendLine()
+                        tB.AppendLine()
                             .AppendLine().Append("{{K|Note: there are options available in the options menu to show this popup at world gen and when loading a save.}}");
 
-                    sB.AppendLineEnd();
+                    tB.AppendLineEnd();
 
                     options.Clear(Dispose: true);
 
@@ -1036,10 +929,10 @@ namespace UD_Relic_Revealer.Mod
                     result = await UIUtils.PerformPickOptionAsync(
                         OptionDataSet: options,
                         Title: title,
-                        Intro: sB.ToString(),
-                        IntroIcon: RevealerIcon,
+                        Intro: tB.ToString(),
+                        IntroIcon: CherubimIcon,
                         NoBackButton: abilityContext,
-                        CancelIsExit: abilityContext,
+                        CancelIsExit: true,
                         DefaultSelected: 0,
                         OnBackCallback: UIUtils.BackSilentResultAsync,
                         OnEscapeCallback: UIUtils.CancelSilentResultAsync);
@@ -1053,10 +946,6 @@ namespace UD_Relic_Revealer.Mod
                     throw x;
 
                 result = UIUtils.CascadableResult.Back;
-            }
-            finally
-            {
-                Event.ResetTo(sB);
             }
 
             return result;
@@ -1098,18 +987,22 @@ namespace UD_Relic_Revealer.Mod
             return ProcessZone(z, E);
         }
 
+        private string GetProcessZoneProp(Type FromEvent)
+            => FromEvent != null
+            ? $"{nameof(RelicTrackerSystem)}.{FromEvent?.Name ?? "MISSING_EVENT"}"
+            : $"{nameof(RelicTrackerSystem)}.{nameof(ProcessZone)}"
+            ;
+
+        private string GetProcessZoneProp(MinEvent FromEvent = null)
+            => GetProcessZoneProp(FromEvent?.GetType())
+            ;
+
         public bool ProcessZone(Zone Z, MinEvent FromEvent = null)
         {
-            string zoneProp = $"{nameof(RelicTrackerSystem)}";
-            if (FromEvent != null)
-                zoneProp += $".{FromEvent?.GetType()?.Name ?? "MISSING_EVENT"}";
-            else
-                zoneProp += $".{nameof(ProcessZone)}";
+            string zoneProp = GetProcessZoneProp(FromEvent);
 
             if (Z.GetZoneProperty(zoneProp).EqualsNoCase("true"))
                 return true;
-
-            // Utils.Log($"{nameof(RelicTrackerSystem)}.{nameof(ProcessZone)} {nameof(Zone)} {Z?.ZoneID ?? "MISSING_ZONE"} ({FromEvent?.GetType()?.Name ?? "NO_EVENT"})");
 
             Z.SetZoneProperty(zoneProp, "true");
 
@@ -1118,40 +1011,21 @@ namespace UD_Relic_Revealer.Mod
             using var processedRelics = ScopeDisposedList<GameObject>.GetFromPool();
             foreach (var zoneObject in Z.YieldObjects())
             {
-                // Utils.Log($"  {nameof(zoneObject)}: {zoneObject?.DebugName ?? "MISSING_OBJECT"}");
                 foreach (var recursiveZoneObject in zoneObject.GetObjectsRecursively())
                 {
-                    // Utils.Log($"    {nameof(recursiveZoneObject)}: {recursiveZoneObject?.DebugName ?? "MISSING_OBJECT"}");
                     if (recursiveZoneObject.InInventory is GameObject zoneObjectContainer)
-                    {
-                        /*if (zoneObjectContainer.TryGetPart(out DoubleContainer doubleContainer)
-                            && !doubleContainer.Master)
-                            continue;*/
-
                         if (sultanLoot == null
                             || !clearedReliquaries.Contains(sultanLoot.Period))
-                        {
-                            if (zoneObjectContainer.TryGetPart(out sultanLoot))
-                            {
-                                /*Utils.Log($"      {nameof(zoneObjectContainer)} {zoneObjectContainer.DebugName ?? "MISSING_OBJECT"} has {nameof(SultanLoot)} with {nameof(SultanLoot.Period)} {sultanLoot.Period} ({nameof(sultanLoot.generated)}: {sultanLoot.generated})");*/
-                            }
-                        }
-                    }
+                            zoneObjectContainer.TryGetPart(out sultanLoot);
 
                     if (sultanLoot == null
                         || !clearedReliquaries.Contains(sultanLoot.Period))
-                    {
-                        if (recursiveZoneObject.TryGetPart(out sultanLoot))
-                        {
-                            /*Utils.Log($"      {nameof(recursiveZoneObject)} {recursiveZoneObject.DebugName ?? "MISSING_OBJECT"} has {nameof(SultanLoot)} with {nameof(SultanLoot.Period)} {sultanLoot.Period} ({nameof(sultanLoot.generated)}: {sultanLoot.generated})");*/
-                        }
-                    }
+                        recursiveZoneObject.TryGetPart(out sultanLoot);
 
                     if (sultanLoot != null
                         && !clearedReliquaries.Contains(sultanLoot.Period)
                         && sultanLoot.generated)
                     {
-                        // Utils.Log($"      {nameof(sultanLoot)}.{nameof(sultanLoot.Period)} is {sultanLoot.Period}, removing relevant relics...");
                         using (var relicRecords = RentRecords())
                         {
                             foreach (var relicRecord in relicRecords)
@@ -1215,14 +1089,13 @@ namespace UD_Relic_Revealer.Mod
         public override void Register(XRLGame Game, IEventRegistrar Registrar)
         {
             Registrar.Register(AfterZoneActivatedEvent.ID, EventOrder.EXTREMELY_LATE);
+            Registrar.Register(ZoneActivatedEvent.ID, EventOrder.EXTREMELY_LATE);
             base.Register(Game, Registrar);
         }
 
         public override void RegisterPlayer(GameObject Player, IEventRegistrar Registrar)
         {
             Registrar.Register(BeforeTakeActionEvent.ID, EventOrder.EXTREMELY_LATE);
-            // Registrar.Register(ZoneBuiltEvent.ID, EventOrder.EXTREMELY_LATE);
-            // Registrar.Register(ZoneActivatedEvent.ID, EventOrder.EXTREMELY_LATE);
             base.RegisterPlayer(Player, Registrar);
         }
 
@@ -1232,12 +1105,31 @@ namespace UD_Relic_Revealer.Mod
             {
                 if (!HasShown
                     && Options.EnableShowOnWorldGen)
+                {
+                    UD_Player_RelicRevealer.HasShown = true;
                     Instance.AskRevealWhat();
+                }
             }
             finally
             {
                 HasShown = true;
-                The.Player?.UnregisterEvent(this, BeforeTakeActionEvent.ID);
+                // The.Player?.UnregisterEvent(this, BeforeTakeActionEvent.ID);
+            }
+            try
+            {
+                if (The.Player.CurrentZone is Zone z)
+                {
+                    if (ZoneWantsProcessing
+                        && !z.GetZoneProperty(GetProcessZoneProp(typeof(AfterZoneActivatedEvent))).EqualsNoCase("true"))
+                    {
+                        z.SetZoneProperty(GetProcessZoneProp(typeof(AfterZoneActivatedEvent)), "true");
+                        ProcessZone(z);
+                    }
+                }
+            }
+            finally
+            {
+                ZoneWantsProcessing = false;
             }
             return base.HandleEvent(E);
         }
@@ -1250,14 +1142,16 @@ namespace UD_Relic_Revealer.Mod
 
         public virtual bool HandleEvent(AfterZoneActivatedEvent E)
         {
-            // Utils.Log($"{nameof(RelicTrackerSystem)}.{nameof(HandleEvent)}({nameof(AfterZoneActivatedEvent)} E)...");
             ProcessZoneEvent(E);
             return base.HandleEvent(E);
         }
 
         public override bool HandleEvent(ZoneActivatedEvent E)
         {
-            ProcessZoneEvent(E);
+            if (!E.Zone.GetZoneProperty(GetProcessZoneProp(typeof(AfterZoneActivatedEvent))).EqualsNoCase("true"))
+            {
+                ZoneWantsProcessing = true;
+            }
             return base.HandleEvent(E);
         }
 
@@ -1271,26 +1165,25 @@ namespace UD_Relic_Revealer.Mod
         {
             var result = UIUtils.CascadableResult.Continue;
 
-            var sB = Event.NewStringBuilder();
+            int worldSeed = The.Game.GetWorldSeed();
+            using var tB = TextBuilder.Get();
             using var options = new PickOptionDataSetAsync<RelicTrackerSystem, UIUtils.CascadableResult>();
             try
             {
                 string title = $"Relic Revealer".Colored("yellow");
                 do
                 {
-                    sB.Clear();
+                    tB.Clear();
                     options.Clear(Dispose: true);
 
-                    sB.AppendColored("Y", "Welcome to the Relic Tracker (and Cherubim Viewer)!")
+                    tB.AppendColored("Y", "Welcome to the Relic Tracker (and Cherubim Viewer)!")
+                        .AppendLine()
+                        .AppendLine().Append($"The world seed is ").AppendColored("C", worldSeed.ToString()).Append(".")
                         .AppendLine()
                         .AppendLine().AppendQuote("{{Y|Track Relics}}").Append(" allows you to view the sultan relics and masks that have generated for this world, ")
                             .Append("including those found in the sultan's reliquary in their tomb.")
-                        /*.AppendLine()
-                        .AppendBulletLine().AppendColored("W", "Reliquary relics").Append(" are generated when the zone the reliquary is in is first generated, instead of being ")
-                            .AppendColored("C", "cached").Append(" like those in ").AppendColored("C", "historic sites").Append(". Because of this, the ")
-                            .AppendQuote("final").Append(" relic may be different in some ways.")*/
                         .AppendLine()
-                        .AppendLine()/*.AppendBulletLine()*/.Append("The tracker will keep tabs on whether or not you've ").AppendColored("G", "claimed").Append(" a given relic, who was ")
+                        .AppendLine().Append("The tracker will keep tabs on whether or not you've ").AppendColored("G", "claimed").Append(" a given relic, who was ")
                             .AppendColored("W", "last to hold it").Append(" if it's not in your possession, and whether the relic has been irrevocably ").AppendColored("r", "destroyed.")
                         .AppendLine()
                         .AppendLine().AppendQuote("{{Y|View Cherubim}}").Append(" displays a list of each of the type of cherubim that will be found guarding each of the sultan tombs. ")
@@ -1301,8 +1194,8 @@ namespace UD_Relic_Revealer.Mod
                     options.Add(new()
                     {
                         Element = this,
-                        Text = "Track Relics",
-                        Icon = RelicsIcon,
+                        Text = "Track Relics".Color("Y"),
+                        Icon = ViewableRelicRecords.Select(r => r.Render).GetRandomElementCosmetic(),
                         Hotkey = 'r',
                         Callback = async e => (await RevealRelicsAsync(
                             RelicTrackerSystem: e,
@@ -1314,8 +1207,8 @@ namespace UD_Relic_Revealer.Mod
                     options.Add(new()
                     {
                         Element = this,
-                        Text = "View Cherubim",
-                        Icon = CherubBlueprints.GetRandomElementCosmetic().GetRenderable(),
+                        Text = "View Cherubim".Color("Y"),
+                        Icon = CherubRecords.GetRandomElementCosmetic().GetRenderable(),
                         Hotkey = 'c',
                         Callback = async e =>(await RevealCherubimAsync(
                             RelicTrackerSystem: e,
@@ -1333,7 +1226,8 @@ namespace UD_Relic_Revealer.Mod
                         options.Add(new()
                         {
                             Element = this,
-                            Text = "I don't want the above options as activated abilities anymore".Color("K"),
+                            Text = "I don't want the above options as activated abilities anymore".Color("y"),
+                            Icon = MissingIcon,
                             Callback = e => Task.Run(() =>
                             {
                                 Options.EnableRelicRevealerActivatedAbility = false;
@@ -1347,7 +1241,8 @@ namespace UD_Relic_Revealer.Mod
                         options.Add(new()
                         {
                             Element = this,
-                            Text = "I want the above options as activated abilities".Color("K"),
+                            Text = "I want the above options as activated abilities".Color("y"),
+                            Icon = MissingIcon,
                             Callback = e => Task.Run(() =>
                             {
                                 Options.EnableRelicRevealerActivatedAbility = true;
@@ -1365,7 +1260,8 @@ namespace UD_Relic_Revealer.Mod
                             options.Add(new()
                             {
                                 Element = this,
-                                Text = "Don't show this after world gen anymore".Color("K"),
+                                Text = "Don't show this after world gen anymore".Color("y"),
+                                Icon = MissingIcon,
                                 Callback = e => Task.Run(() =>
                                 {
                                     Options.EnableShowOnWorldGen = false;
@@ -1379,7 +1275,8 @@ namespace UD_Relic_Revealer.Mod
                             options.Add(new()
                             {
                                 Element = this,
-                                Text = "Always show this after world gen".Color("K"),
+                                Text = "Always show this after world gen".Color("y"),
+                                Icon = MissingIcon,
                                 Callback = e => Task.Run(() =>
                                 {
                                     Options.EnableShowOnWorldGen = true;
@@ -1399,7 +1296,8 @@ namespace UD_Relic_Revealer.Mod
                             options.Add(new()
                             {
                                 Element = this,
-                                Text = "Don't show this after loading a save anymore".Color("K"),
+                                Text = "Don't show this after loading a save anymore".Color("y"),
+                                Icon = MissingIcon,
                                 Callback = e => Task.Run(() =>
                                 {
                                     Options.EnableReshowOnGameLoad = false;
@@ -1413,7 +1311,8 @@ namespace UD_Relic_Revealer.Mod
                             options.Add(new()
                             {
                                 Element = this,
-                                Text = "Always show this after loading a save".Color("K"),
+                                Text = "Always show this after loading a save".Color("y"),
+                                Icon = MissingIcon,
                                 Callback = e => Task.Run(() =>
                                 {
                                     Options.EnableShowOnWorldGen = true;
@@ -1428,7 +1327,7 @@ namespace UD_Relic_Revealer.Mod
                     result = await UIUtils.PerformPickOptionAsync(
                         OptionDataSet: options,
                         Title: title,
-                        Intro: sB.ToString(),
+                        Intro: tB.ToString(),
                         IntroIcon: RevealerIcon,
                         NoBackButton: true,
                         CancelIsExit: true,
@@ -1442,10 +1341,7 @@ namespace UD_Relic_Revealer.Mod
                 Utils.Error($"Failed to ask player what they'd like to reveal", x);
                 return UIUtils.CascadableResult.Cancel;
             }
-            finally
-            {
-                Event.ResetTo(sB);
-            }
+
             return result;
         }
 

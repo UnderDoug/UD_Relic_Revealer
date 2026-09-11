@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-using XRL;
+﻿using XRL;
 using XRL.World;
 
 namespace UD_Relic_Revealer.Mod.Events

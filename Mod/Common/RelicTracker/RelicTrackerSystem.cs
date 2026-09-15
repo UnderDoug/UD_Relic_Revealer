@@ -19,7 +19,6 @@ using XRL.World;
 using XRL.World.Parts;
 using static XRL.World.Parts.ActivatedAbilities;
 
-using UD_Relic_Revealer.Mod.Events;
 using UD_Relic_Revealer.Mod.UI;
 
 namespace UD_Relic_Revealer.Mod
@@ -29,10 +28,7 @@ namespace UD_Relic_Revealer.Mod
     [HasCallAfterGameLoaded]
     [HasWishCommand]
     [Serializable]
-    public class RelicTrackerSystem
-        : IPlayerSystem
-        , IPlayerMutator
-        , IModEventHandler<AfterZoneActivatedEvent>
+    public class RelicTrackerSystem : IPlayerSystem, IPlayerMutator
     {
         [GameBasedStaticCache(CreateInstance = false)]
         private static RelicTrackerSystem _Instance;
@@ -191,8 +187,6 @@ namespace UD_Relic_Revealer.Mod
 
         protected bool ProcessedRobberChimesTriggered;
 
-        protected bool ZoneWantsProcessing;
-
         public RelicTrackerSystem()
         { }
 
@@ -332,7 +326,6 @@ namespace UD_Relic_Revealer.Mod
                 Writer.WriteComposite(relicRecord);
 
             Writer.Write(ProcessedRobberChimesTriggered);
-            Writer.Write(ZoneWantsProcessing);
         }
 
         public override void Read(SerializationReader Reader)
@@ -353,7 +346,6 @@ namespace UD_Relic_Revealer.Mod
                 }
             }
             ProcessedRobberChimesTriggered = Reader.ReadBoolean();
-            ZoneWantsProcessing = Reader.ReadBoolean();
         }
 
         public override void AfterLoad(XRLGame game)
@@ -976,7 +968,7 @@ namespace UD_Relic_Revealer.Mod
             if (E.Zone is not Zone z)
                 return false;
 
-            return ProcessZone(z, E);
+            return ProcessZoneFromEvent(z, E);
         }
 
         public bool ProcessZoneEvent(AfterZoneActivatedEvent E)
@@ -984,7 +976,7 @@ namespace UD_Relic_Revealer.Mod
             if (E.Zone is not Zone z)
                 return false;
 
-            return ProcessZone(z, E);
+            return ProcessZoneFromEvent(z, E);
         }
 
         private string GetProcessZoneProp(Type FromEvent)
@@ -997,7 +989,11 @@ namespace UD_Relic_Revealer.Mod
             => GetProcessZoneProp(FromEvent?.GetType())
             ;
 
-        public bool ProcessZone(Zone Z, MinEvent FromEvent = null)
+        public bool ProcessZoneFromEvent(Zone Z, MinEvent FromEvent = null)
+            => ProcessZone(Z, FromEvent?.GetType())
+            ;
+
+        public bool ProcessZone(Zone Z, Type FromEvent = null)
         {
             string zoneProp = GetProcessZoneProp(FromEvent);
 
@@ -1088,7 +1084,6 @@ namespace UD_Relic_Revealer.Mod
 
         public override void Register(XRLGame Game, IEventRegistrar Registrar)
         {
-            Registrar.Register(AfterZoneActivatedEvent.ID, EventOrder.EXTREMELY_LATE);
             Registrar.Register(ZoneActivatedEvent.ID, EventOrder.EXTREMELY_LATE);
             base.Register(Game, Registrar);
         }
@@ -1113,45 +1108,14 @@ namespace UD_Relic_Revealer.Mod
             finally
             {
                 HasShown = true;
-                // The.Player?.UnregisterEvent(this, BeforeTakeActionEvent.ID);
+                The.Player?.UnregisterEvent(this, BeforeTakeActionEvent.ID);
             }
-            try
-            {
-                if (The.Player.CurrentZone is Zone z)
-                {
-                    if (ZoneWantsProcessing
-                        && !z.GetZoneProperty(GetProcessZoneProp(typeof(AfterZoneActivatedEvent))).EqualsNoCase("true"))
-                    {
-                        z.SetZoneProperty(GetProcessZoneProp(typeof(AfterZoneActivatedEvent)), "true");
-                        ProcessZone(z);
-                    }
-                }
-            }
-            finally
-            {
-                ZoneWantsProcessing = false;
-            }
-            return base.HandleEvent(E);
-        }
-
-        public override bool HandleEvent(ZoneBuiltEvent E)
-        {
-            ProcessZoneEvent(E);
-            return base.HandleEvent(E);
-        }
-
-        public virtual bool HandleEvent(AfterZoneActivatedEvent E)
-        {
-            ProcessZoneEvent(E);
             return base.HandleEvent(E);
         }
 
         public override bool HandleEvent(ZoneActivatedEvent E)
         {
-            if (!E.Zone.GetZoneProperty(GetProcessZoneProp(typeof(AfterZoneActivatedEvent))).EqualsNoCase("true"))
-            {
-                ZoneWantsProcessing = true;
-            }
+            AfterZoneActivatedCommand.Issue(E.Zone, E);
             return base.HandleEvent(E);
         }
 

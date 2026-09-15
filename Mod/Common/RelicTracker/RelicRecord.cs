@@ -788,7 +788,7 @@ namespace UD_Relic_Revealer.Mod
                             ? $"{"you".Colored("g")}, although you {"don't currently".Colored("W")} possess {it}"
                             : LastHeldBy.Colored("W");
 
-                        elements.Add(new("", $"was last held by {lastHeldBy}"));
+                        elements.Add(new("", $"{IsPlural.GetPlural("was", "were")} last held by {lastHeldBy}"));
                     }
                 }
                 else

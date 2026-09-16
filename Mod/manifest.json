@@ -2,7 +2,7 @@
     "id": "UD_Relic_Revealer",
     "title": "Relic Revealer",
     "description": "Adds two popup UIs for tracking a world's relics and viewing its cherubim.\n\nIncludes options to have the UI popup displayed immediately after world-gen, immediately after loading a save, and by use of two activated abilities (one each for relics and cherubim).\n\nWish for '{{Y|UD AskReveal}}' to display the base UI, or '{{Y|UD RevealRelics}}' or '{{Y|UD RevealCherubim}}' for the individual UIs.",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "author": "{{K-g-G-Y-G-g-K alternation|UnderDoug}}",
     "tags": "Cheat,Feature,Vanilla+,Quality of Life,QoL,Harmony",
     "PreviewImage": "preview.png"

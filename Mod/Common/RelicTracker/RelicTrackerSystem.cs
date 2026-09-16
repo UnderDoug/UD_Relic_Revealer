@@ -346,6 +346,11 @@ namespace UD_Relic_Revealer.Mod
                 }
             }
             ProcessedRobberChimesTriggered = Reader.ReadBoolean();
+            if (Reader.ModVersions.TryGetValue(Utils.MOD_ID, out XRL.Version readVersion))
+            {
+                if (readVersion < new XRL.Version(0, 0, 2))
+                    _ = Reader.ReadBoolean(); // WantsZoneProcessing, removed in 0.0.2
+            }
         }
 
         public override void AfterLoad(XRLGame game)
@@ -964,14 +969,6 @@ namespace UD_Relic_Revealer.Mod
         }
 
         public bool ProcessZoneEvent(IZoneEvent E)
-        {
-            if (E.Zone is not Zone z)
-                return false;
-
-            return ProcessZoneFromEvent(z, E);
-        }
-
-        public bool ProcessZoneEvent(AfterZoneActivatedEvent E)
         {
             if (E.Zone is not Zone z)
                 return false;

@@ -20,6 +20,7 @@ using XRL.World.Parts;
 using static XRL.World.Parts.ActivatedAbilities;
 
 using UD_Relic_Revealer.Mod.UI;
+using System.Text.RegularExpressions;
 
 namespace UD_Relic_Revealer.Mod
 {
@@ -44,6 +45,8 @@ namespace UD_Relic_Revealer.Mod
         }
 
         private static string LastGameID;
+
+        public static string RelicBookID => $"{Utils.MOD_ID}_RelicTrackerBook";
 
         public static Renderable NoRelicsIcon = new(
             Tile: "Abilities/abil_berate.bmp",
@@ -187,6 +190,8 @@ namespace UD_Relic_Revealer.Mod
 
         protected bool ProcessedRobberChimesTriggered;
 
+        private List<IBookContents.BookPageInfo> BookPageInfos; // Added in 0.0.3
+
         public RelicTrackerSystem()
         { }
 
@@ -277,6 +282,9 @@ namespace UD_Relic_Revealer.Mod
 
                 Initialized = !ViewableRelicRecords.IsNullOrEmpty();
 
+                if (Initialized)
+                    ProduceRelicBook();
+
                 if (!Silent)
                 {
                     if (Initialized)
@@ -326,6 +334,10 @@ namespace UD_Relic_Revealer.Mod
                 Writer.WriteComposite(relicRecord);
 
             Writer.Write(ProcessedRobberChimesTriggered);
+
+            Writer.WriteOptimized(BookPageInfos?.Count ?? -1);
+            foreach (var bookPageInfo in BookPageInfos.IteratorSafe())
+                Writer.Write(bookPageInfo);
         }
 
         public override void Read(SerializationReader Reader)
@@ -350,6 +362,20 @@ namespace UD_Relic_Revealer.Mod
             {
                 if (readVersion < new XRL.Version(0, 0, 2))
                     _ = Reader.ReadBoolean(); // WantsZoneProcessing, removed in 0.0.2
+                else
+                if (readVersion >= new XRL.Version(0, 0, 3))
+                {
+                    count = Reader.ReadOptimizedInt32();
+                    if (count >= 0)
+                    {
+                        BookPageInfos = new(count);
+                        while (count > 0)
+                        {
+                            BookPageInfos.Add(Reader.ReadComposite() as IBookContents.BookPageInfo);
+                            count--;
+                        }
+                    }
+                }
             }
         }
 
@@ -409,16 +435,25 @@ namespace UD_Relic_Revealer.Mod
             : null
             ;
 
-        public IEnumerable<RelicRecord> GenerateRelicRecords(IEnumerable<GameObject> Source, int ForReliquary = 0)
+        public IEnumerable<RelicRecord> GenerateRelicRecords(IEnumerable<GameObject> Source, int ForReliquary = 0, bool IsSultanRelic = false)
         {
             foreach (var gameObject in Source.IteratorSafe())
+            {
                 if (NewRelicRecord(gameObject, ForReliquary) is RelicRecord relicRecord)
+                {
+                    if (IsSultanRelic)
+                    {
+                        if (!relicRecord.IsMask)
+                            relicRecord.IsSultanRelic = true;
+                    }
                     yield return relicRecord;
+                }
+            }
         }
 
         public IEnumerable<RelicRecord> GenerateZoneCacheRecords()
         {
-            foreach (var relicRecord in GenerateRelicRecords(The.ZoneManager?.CachedObjects?.Values))
+            foreach (var relicRecord in GenerateRelicRecords(The.ZoneManager?.CachedObjects?.Values, IsSultanRelic: true))
                 yield return relicRecord;
         }
 
@@ -444,6 +479,8 @@ namespace UD_Relic_Revealer.Mod
 
                     if (NewRelicRecord(relic, ForReliquary: i) is not RelicRecord relicRecord)
                         continue;
+
+                    relicRecord.IsSultanRelic = true;
 
                     yield return relicRecord;
                 }
@@ -1079,35 +1116,179 @@ namespace UD_Relic_Revealer.Mod
             return any;
         }
 
+        private IBookContents.BookPageInfo ProduceBookCoverPageInfo()
+            => new IBookContents.BookPageInfo
+            {
+                Title = UD_RelicTrackerBook.Title,
+                Text = GetBookCoverPageText(),
+                Format = "Auto",
+                Margins = "1,2,2,2",
+            }
+            ;
+
+        private IBookContents.BookPageInfo ProduceBookLocationPageInfo()
+            => new IBookContents.BookPageInfo
+            {
+                Title = UD_RelicTrackerBook.Title,
+                Text = GetBookLocationPageText(),
+                Format = "Auto",
+                Margins = "1,2,2,2",
+            }
+            ;
+
+        private IBookContents.BookPageInfo ProduceBookMaskPageInfo()
+            => new IBookContents.BookPageInfo
+            {
+                Title = UD_RelicTrackerBook.Title,
+                Text = GetBookMaskPageText(),
+                Format = "Auto",
+                Margins = "1,2,2,2",
+            }
+            ;
+
+        private string GetBookCoverPageText()
+        {
+            using var pageBuilder = TextBuilder.Get();
+            pageBuilder
+                .AppendColored("W", "A Word From the Author")
+                .AppendLine()
+                .AppendLine("With the layers of society forming a mirror of each other, it can be difficult to determine if the attachment to their posessions experienced by the elder saads and sultans of bygone eras is a consequence of a borader societal inclination or is itself the progenitor thereof.")
+                .AppendLine()
+                .AppendLine("Nevertheless, it can be stated with little room for doubt that these most venerated members of history were as possessed of this predisposition as any of the countless masses who made up their subjects.")
+                .AppendLine()
+                .AppendLine("Although it is likely that these objects were strictly ceremonial in nature, the annals of history belabour the potency of the sultans in particular. It becomes necessary, then, to consider the possibility that there is more than mere appearances to the accounts.")
+                .AppendLine()
+                .AppendLine("[{{c|compiled from the notes of Sheba Hegadias}}]")
+                .AppendLine().AppendColored("k", "This is a WIP book that you probably shouldn't be able to find yet...");
+            return pageBuilder.ToString();
+        }
+
+        private string GetBookLocationPageText()
+        {
+            using var pageBuilder = TextBuilder.Get();
+            pageBuilder
+                .AppendColored("W", "Relics In The Present")
+                .AppendLine()
+                .AppendLine("It is important to note that some of these historically important objects were committed to the admittedly strange practice of being buried with their owner and likely reside with them to this day in the upper layers of the Tomb of the Eaters.")
+                .AppendLine()
+                .AppendLine("Many of these artifacts remain unaccounted for, however, depicted in artworks or included in both written and oral traditions but ostensibly missing from any burial records.")
+                .AppendLine()
+                .AppendLine("The locations of these heretofore unaccounted relics could perhaps be discovered with careful study of the remnants of the sultans, such as their {{Y|statues}} or the many {{painted|paintings}} and {{engraved|engravings}} of them and their deeds.")
+                .AppendLine().AppendColored("k", "This is a WIP book that you probably shouldn't be able to find yet...");
+            return pageBuilder.ToString();
+        }
+
+        private string GetBookMaskPageText()
+        {
+            using var pageBuilder = TextBuilder.Get();
+            pageBuilder
+                .AppendColored("W", "Regarding Sultan Masks")
+                .AppendLine()
+                .AppendLine("Most peculiar amongst the prized posessions of the sultans were their masks. Never depicted without them, we can be nearly certain that every sultan had one.")
+                .AppendLine()
+                .AppendLine("The sultans were a mysterious and, oftentimes, fanciful cohort and the nuances and meaning surrounding the appearance and purpose of their masks could fill a volume on its own.")
+                .AppendLine()
+                .AppendLine("Alas, it is a volume other than this one that they must fill.")
+                .AppendLine()
+                .AppendLine().AppendColored("k", "This is a WIP book that you probably shouldn't be able to find yet...");
+            return pageBuilder.ToString();
+        }
+
+        public IBookContents.BookPageInfo GetBookCoverPageInfo()
+            => GetBookPageInfos() is List<IBookContents.BookPageInfo> bookPageInfos
+                && bookPageInfos.Count >= 1
+            ? bookPageInfos[0]
+            : null
+            ;
+
+        public IBookContents.BookPageInfo GetBookLocationPageInfo()
+            => GetBookPageInfos() is List<IBookContents.BookPageInfo> bookPageInfos
+                && bookPageInfos.Count >= 2
+            ? bookPageInfos[1]
+            : null
+            ;
+
+        public IBookContents.BookPageInfo GetBookMaskPageInfo()
+            => GetBookPageInfos() is List<IBookContents.BookPageInfo> bookPageInfos
+                && bookPageInfos.Count >= 3
+            ? bookPageInfos[2]
+            : null
+            ;
+
+        public List<IBookContents.BookPageInfo> GetBookPageInfos()
+        {
+            try
+            {
+                if (BookPageInfos.IsNullOrEmpty())
+                {
+                    BookPageInfos ??= new();
+                    BookPageInfos.Add(ProduceBookCoverPageInfo());
+                    BookPageInfos.Add(ProduceBookLocationPageInfo());
+                    BookPageInfos.Add(ProduceBookMaskPageInfo());
+                }
+            }
+            catch (Exception x)
+            {
+                Utils.Warn($"Failed to {nameof(GetBookPageInfos)}", x);
+            }
+            return BookPageInfos;
+        }
+
+        public IEnumerable<IBookContents.BookPageInfo> GetCompleteBookPageInfos()
+        {
+            foreach (var openingPage in GetBookPageInfos().IteratorSafe())
+                yield return openingPage;
+
+            if (ViewableRelicRecords.Where(r => r.IsSultanRelic) is not IEnumerable<RelicRecord> sultanRelics
+                || sultanRelics.IsNullOrEmpty()
+                //|| sultanRelics.Count() > 0 // remove this line to stop testing the "no pages" book.
+                )
+            {
+                yield return new IBookContents.BookPageInfo
+                {
+                    Title = UD_RelicTrackerBook.Title,
+                    Text = "{{W|A World, Cursed}}\n\nThis world is somehow without sultan relics...\n\nIt feels wrong for it to be the case, and yet the fact is apparent.",
+                    Format = "Auto",
+                    Margins = "1,2,2,2",
+                };
+            }
+            else
+            {
+                foreach (var sultanRelic in sultanRelics)
+                    if (sultanRelic.GetBookPageInfo() is IBookContents.BookPageInfo relicBookPageInfo)
+                        yield return relicBookPageInfo;
+            }
+        }
+
+        public void ProduceRelicBook()
+        {
+            string logText = $"Relic Tracker Book with ID {$"@{nameof(UD_RelicTrackerBook)}"}";
+            try
+            {
+                if (!UD_RelicTrackerBook.BookContents.IsNullOrEmpty())
+                {
+                    Utils.Warn($"{logText} already exists...");
+                    return;
+                }
+
+                if (UD_RelicTrackerBook.CacheContents(this) is not List<IBookContents.BookPageInfo> bookContents)
+                {
+                    Utils.Warn($"Failed to initialize {logText}...");
+                    return;
+                }
+
+                Utils.Info($"Initialized {logText}...");
+            }
+            catch (Exception x)
+            {
+                Utils.Warn($"Failed to initialize {logText}...", x);
+            }
+        }
+
         public override void Register(XRLGame Game, IEventRegistrar Registrar)
         {
             Registrar.Register(ZoneActivatedEvent.ID, EventOrder.EXTREMELY_LATE);
             base.Register(Game, Registrar);
-        }
-
-        public override void RegisterPlayer(GameObject Player, IEventRegistrar Registrar)
-        {
-            Registrar.Register(BeforeTakeActionEvent.ID, EventOrder.EXTREMELY_LATE);
-            base.RegisterPlayer(Player, Registrar);
-        }
-
-        public override bool HandleEvent(BeforeTakeActionEvent E)
-        {
-            try
-            {
-                if (!HasShown
-                    && Options.EnableShowOnWorldGen)
-                {
-                    UD_Player_RelicRevealer.HasShown = true;
-                    Instance.AskRevealWhat();
-                }
-            }
-            finally
-            {
-                HasShown = true;
-                The.Player?.UnregisterEvent(this, BeforeTakeActionEvent.ID);
-            }
-            return base.HandleEvent(E);
         }
 
         public override bool HandleEvent(ZoneActivatedEvent E)

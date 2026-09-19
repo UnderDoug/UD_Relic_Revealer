@@ -21,6 +21,7 @@ using XRL.World.Parts;
 using XRL.World.Text;
 
 using static UD_Relic_Revealer.Mod.Utils;
+using static XRL.World.Parts.UD_RelicData;
 
 namespace UD_Relic_Revealer.Mod
 {
@@ -28,6 +29,10 @@ namespace UD_Relic_Revealer.Mod
     public class RelicRecord : IComposite, IDisposable
     {
         public static string RelicEraProp => $"{MOD_ID}_{nameof(RelicRecord)}.{nameof(Era)}";
+        public static string RelicItemTypeProp => $"{MOD_ID}_{nameof(RelicRecord)}.itemType";
+        public static string RelicTypeProp => $"{MOD_ID}_{nameof(RelicRecord)}.Type";
+
+        public static History SultanHistory => The.Game?.sultanHistory;
 
         protected Guid _TrackerID;
         public Guid TrackerID
@@ -119,9 +124,24 @@ namespace UD_Relic_Revealer.Mod
                         _Tier = Relic?.GetTier();
                     else
                         _Tier = (int)Math.Round((commerce.Value - 200) / 100.0);*/
-                    _Tier = Relic?.GetTier();
+                    _Tier = Relic?.GetTier()
+                        ?? Relic?.GetPart<UD_RelicData>()?.Tier;
                 }
                 return _Tier.GetValueOrDefault();
+            }
+        }
+
+        private string _Type;
+        public string Type
+        {
+            get
+            {
+                if (_Type == null
+                    && TryGetType(Relic, RelicName, out string type, Snapshot))
+                    _Type = type;
+
+                return _Type
+                    ?? "Artifact";
             }
         }
 
@@ -131,12 +151,15 @@ namespace UD_Relic_Revealer.Mod
             get
             {
                 if (_Era == null
-                    && TryGetEra(Relic, RelicName, out int era))
+                    && TryGetEra(Relic, RelicName, out int era, Snapshot))
                     _Era = era;
 
                 return _Era.GetValueOrDefault();
             }
         }
+
+        [NonSerialized]
+        public bool IsSultanRelic; // Added in 0.0.3
 
         private string _DisplayName;
         public string DisplayName => _DisplayName ??= GetRelicDisplayName(Relic);
@@ -164,6 +187,51 @@ namespace UD_Relic_Revealer.Mod
         public string it => Pronouns.Subjective;
         public string @is => IsPlural ? "are" : "is";
         public string itIs => $"{it} {@is}";
+
+        private string _DescriptiveNoun; // Added in 0.0.3
+        public string DescriptiveNoun
+        {
+            get
+            {
+                if (_DescriptiveNoun.IsNullOrEmpty()
+                    && TryGetNoun(Relic, RelicName, out string type, Snapshot))
+                    _DescriptiveNoun = type;
+
+                return _DescriptiveNoun
+                    ?? Relic?.GetPropertyOrTag("CreatureType")
+                    ?? "artifact"
+                    ;
+            }
+        }
+
+        public string DescriptiveNounArticle
+            => DescriptiveNoun?.StartsWith("pair") is not false
+            ? IsPlural.GetPlural(!Grammar.IndefiniteArticleShouldBeAn(DescriptiveNoun) ? "a" : "an", "some")
+            : "a"
+            ;
+
+        private string _Subtype; // Added in 0.0.3
+        public string Subtype
+        {
+            get
+            {
+                if (_Subtype.IsNullOrEmpty()
+                    && TryGetSubtype(Relic, RelicName, out string subtype, Snapshot))
+                    _Subtype = subtype;
+
+                return _Subtype
+                    ?? "artifact"
+                    ;
+            }
+        }
+
+        public string SubtypeDisplay
+            => Subtype switch
+            {
+                "ranged" => $"weapon",
+                "armor" => $"piece of {Subtype}",
+                _ => Subtype,
+            };
 
         private Renderable _Render;
         public IRenderable Render
@@ -245,6 +313,9 @@ namespace UD_Relic_Revealer.Mod
         public bool IsMask => _IsMask ??= (Relic?.HasPart(nameof(SultanMask)) is true);
 
         private int _ForReliquary;
+        /// <summary>
+        /// Indicates the sultan period reliquary <see cref="Relic"/> is intended for as loot. 
+        /// </summary>
         public int ForReliquary
         {
             get => _ForReliquary;
@@ -379,6 +450,18 @@ namespace UD_Relic_Revealer.Mod
             && The.ActiveZone == (Relic?.CurrentZone ?? Relic?.InInventory?.CurrentZone)
             ;
 
+        private IBookContents.BookPageInfo BookPageInfo; // Added in 0.0.3
+
+        public HistoricEntitySnapshot Snapshot
+            => SultanHistory
+                ?.GetEntitiesByDelegate(e => e.GetCurrentSnapshot().Name == RelicName)
+                ?.FirstOrDefault()
+                ?.GetCurrentSnapshot()
+            ;
+
+        private List<ElementData> RelicElements = new(); // Added in 0.0.3
+        private List<FactionFeelingData> RelicFactionFeelings = new(); // Added in 0.0.3
+
         public RelicRecord()
         { }
 
@@ -411,10 +494,16 @@ namespace UD_Relic_Revealer.Mod
             Writer.Write(_Era.HasValue);
             Writer.WriteOptimized(Era);
 
+            Writer.Write(IsSultanRelic);
+
             Writer.WriteOptimized(DisplayName);
             Writer.WriteOptimized(DisplayNameShort);
             Writer.WriteOptimized(RelicName);
             Writer.WriteOptimized(_Pronouns);
+
+            Writer.WriteOptimized(DescriptiveNoun);
+            Writer.WriteOptimized(Subtype);
+
             Writer.WriteComposite(_Render);
             Writer.WriteOptimized(Description);
             Writer.WriteOptimized(Story);
@@ -429,6 +518,11 @@ namespace UD_Relic_Revealer.Mod
             Writer.Write(IsDestroyed);
             Writer.Write(_Pinned);
             Writer.Write(_Valid);
+
+            Writer.Write(BookPageInfo);
+
+            Writer.WriteComposite(RelicElements);
+            Writer.WriteComposite(RelicFactionFeelings);
         }
 
         public void Read(SerializationReader Reader)
@@ -450,10 +544,33 @@ namespace UD_Relic_Revealer.Mod
             else
                 _ = Reader.ReadOptimizedInt32();
 
+            if (Reader.ModVersions.TryGetValue(MOD_ID, out XRL.Version readVersion))
+            {
+                if (readVersion < new XRL.Version(0, 0, 3))
+                    IsSultanRelic = false;
+                else
+                    IsSultanRelic = Reader.ReadBoolean();
+            }
+
             _DisplayName = Reader.ReadOptimizedString();
             _DisplayNameShort = Reader.ReadOptimizedString();
             _RelicName = Reader.ReadOptimizedString();
             _Pronouns = Reader.ReadOptimizedString();
+
+            if (Reader.ModVersions.TryGetValue(MOD_ID, out readVersion))
+            {
+                if (readVersion < new XRL.Version(0, 0, 3))
+                {
+                    _DescriptiveNoun = "artifact";
+                    _Subtype = "artifact";
+                }
+                else
+                {
+                    _DescriptiveNoun = Reader.ReadOptimizedString();
+                    _Subtype = Reader.ReadOptimizedString();
+
+                }
+            }
 
             _Render = Reader.ReadComposite<Renderable>();
             _Description = Reader.ReadOptimizedString();
@@ -471,6 +588,17 @@ namespace UD_Relic_Revealer.Mod
             _IsDestroyed = Reader.ReadBoolean();
             _Pinned = Reader.ReadBoolean();
             _Valid = Reader.ReadBoolean();
+
+            if (Reader.ModVersions.TryGetValue(MOD_ID, out readVersion))
+            {
+                if (readVersion >= new XRL.Version(0, 0, 3))
+                {
+                    BookPageInfo = Reader.ReadComposite() as IBookContents.BookPageInfo;
+
+                    RelicElements = Reader.ReadCompositeList<ElementData>();
+                    RelicFactionFeelings = Reader.ReadCompositeList<FactionFeelingData>();
+                }
+            }
         }
 
         public static string GetRelicDisplayName(GameObject Relic, bool Short = false)
@@ -555,6 +683,8 @@ namespace UD_Relic_Revealer.Mod
                     _DisplayName = null;
                     _DisplayNameShort = null;
                     _Pronouns = null;
+                    _DescriptiveNoun = null;
+                    _Subtype = null;
                     _Render = null;
                     _Description = null;
                     _Story = null;
@@ -585,11 +715,36 @@ namespace UD_Relic_Revealer.Mod
                 _ = DisplayName;
                 _ = DisplayNameShort;
                 _ = Pronouns;
+                _ = DescriptiveNoun;
+                _ = Subtype;
                 _ = Render;
                 _ = Description;
                 _ = Story;
 
                 _ = LastHeldBy;
+
+                if (Relic != null
+                    && Relic.TryGetPart(out UD_RelicData relicData))
+                {
+                    relicData.FinalizeData(Snapshot);
+
+                    RelicElements ??= new();
+                    RelicElements.Clear();
+                    RelicElements.AddRange(relicData.YieldRelicElements());
+
+                    RelicFactionFeelings ??= new();
+                    RelicFactionFeelings.Clear();
+                    RelicFactionFeelings.AddRange(relicData.YieldRelicFactionFeelings());
+                }
+                else
+                if (Snapshot != null)
+                {
+                    RelicElements.AddRange(GetRelicElements(Snapshot));
+                    RelicFactionFeelings.AddRange(GetRelicFactionFeelings(Snapshot));
+                }
+
+                if (IsSultanRelic)
+                    _ = GetBookPageInfo();
             });
             return this;
         }
@@ -629,18 +784,27 @@ namespace UD_Relic_Revealer.Mod
             return true;
         }
 
-        public static bool TryGetEra(GameObject Relic, string RelicName, out int Era)
+        public static bool TryGetEra(GameObject Relic, string RelicName, out int Era, HistoricEntitySnapshot Snapshot = null)
         {
             Era = 0;
+
+            if (Relic != null
+                && Relic.TryGetPart(out UD_RelicData relicData))
+            {
+                Era = relicData.Period;
+                return true;
+            }
+
+            if (Relic?.GetStringProperty(RelicEraProp) is string relicPeriodProp
+                && int.TryParse(relicPeriodProp, out Era))
+                return true;
+
             if (!RelicName.IsNullOrEmpty())
             {
-                if (The.Game?.sultanHistory?.GetEntitiesByDelegate(e => e.GetCurrentSnapshot().Name == RelicName)?.FirstOrDefault() is HistoricEntity relicEntity
-                    && relicEntity.GetCurrentSnapshot()?.GetProperty("period", null) is string relicPeriod
-                    && int.TryParse(relicPeriod, out Era))
-                    return true;
+                Snapshot ??= SultanHistory?.GetEntitiesByDelegate(e => e.GetCurrentSnapshot().Name == RelicName)?.FirstOrDefault()?.GetCurrentSnapshot();
 
-                if (Relic?.GetStringProperty(RelicEraProp) is string relicPeriodProp
-                    && int.TryParse(relicPeriodProp, out Era))
+                if (Snapshot?.GetProperty("period", null) is string relicPeriod
+                    && int.TryParse(relicPeriod, out Era))
                     return true;
             }
 
@@ -648,6 +812,138 @@ namespace UD_Relic_Revealer.Mod
                 && Relic.TryGetPart(out SultanMask sultanMask)
                 && (Era = sultanMask.Period) > 0)
                 return true;
+
+            return false;
+        }
+
+        public static bool TryGetNoun(GameObject Relic, string RelicName, out string Noun, HistoricEntitySnapshot Snapshot = null)
+        {
+            Noun = null;
+
+
+            if (Relic != null
+                && Relic.TryGetPart(out UD_RelicData relicData)
+                && relicData.ItemType != "unknown"
+                && !relicData.ItemType.IsNullOrEmpty())
+            {
+                Noun = relicData.ItemType;
+                return true;
+            }
+
+            if (Relic?.GetStringProperty(RelicItemTypeProp) is string relicTypeProp
+                && relicTypeProp != "unknown")
+            {
+                Noun = relicTypeProp;
+                return true;
+            }
+
+            if (!RelicName.IsNullOrEmpty())
+            {
+                Snapshot ??= SultanHistory?.GetEntitiesByDelegate(e => e.GetCurrentSnapshot().Name == RelicName)?.FirstOrDefault()?.GetCurrentSnapshot();
+
+                if (Snapshot?.GetProperty("itemType", null) is string relicType
+                    && relicType != "unknown")
+                {
+                    Noun = relicType;
+                    return true;
+                }
+            }
+
+            if (Relic != null
+                && Relic.TryGetPart(out SultanMask sultanMask))
+            {
+                Noun = "sultan mask";
+                return true;
+            }
+
+            return false;
+        }
+
+        public static bool TryGetType(GameObject Relic, string RelicName, out string Type, HistoricEntitySnapshot Snapshot = null)
+        {
+            Type = null;
+
+            if (Relic != null
+                && Relic.TryGetPart(out UD_RelicData relicData)
+                && !relicData.Type.IsNullOrEmpty())
+            {
+                Type = relicData.Type;
+                return true;
+            }
+
+            if (Relic?.GetStringProperty(RelicTypeProp) is string relicTypeProp
+                && !relicTypeProp.IsNullOrEmpty())
+            {
+                Type = relicTypeProp;
+                return true;
+            }
+
+            if (!RelicName.IsNullOrEmpty())
+            {
+                Snapshot ??= SultanHistory?.GetEntitiesByDelegate(e => e.GetCurrentSnapshot().Name == RelicName)?.FirstOrDefault()?.GetCurrentSnapshot();
+
+                if (Snapshot?.GetProperty("itemType", null) is string relicType
+                    && !relicType.IsNullOrEmpty()
+                    && RelicGenerator.TypeMap.TryGetValue(relicType, out relicType))
+                {
+                    Type = relicType;
+                    return true;
+                }
+            }
+
+            if (Relic?.HasPart<SultanMask>() is true)
+            {
+                Type = nameof(SultanMask);
+                return true;
+            }
+
+            return false;
+        }
+
+        public static bool TryGetSubtype(GameObject Relic, string RelicName, out string Subtype, HistoricEntitySnapshot Snapshot = null)
+        {
+            Subtype = null;
+
+            if (Relic != null
+                && Relic.TryGetPart(out UD_RelicData relicData))
+            {
+                if (!relicData.Subtype.IsNullOrEmpty())
+                {
+                    Subtype = relicData.Subtype;
+                    return true;
+                }
+                if (!relicData.Type.IsNullOrEmpty())
+                {
+                    Subtype = RelicGenerator.GetSubtype(relicData.Type);
+                    return true;
+                }
+            }
+
+            if (Relic?.GetStringProperty(RelicTypeProp) is string relicTypeProp
+                && !relicTypeProp.IsNullOrEmpty())
+            {
+                Subtype = RelicGenerator.GetSubtype(relicTypeProp);
+                return true;
+            }
+
+            if (!RelicName.IsNullOrEmpty())
+            {
+                Snapshot ??= SultanHistory?.GetEntitiesByDelegate(e => e.GetCurrentSnapshot().Name == RelicName)?.FirstOrDefault()?.GetCurrentSnapshot();
+
+                if (Snapshot?.GetProperty("itemType", null) is string relicType
+                    && !relicType.IsNullOrEmpty()
+                    && RelicGenerator.TypeMap.TryGetValue(relicType, out relicType))
+                {
+                    Subtype = RelicGenerator.GetSubtype(relicType);
+                    return true;
+                }
+            }
+
+            if (Relic?.HasPart<SultanMask>() is true)
+            {
+                Subtype = nameof(SultanMask);
+                return true;
+            }
 
             return false;
         }
@@ -660,21 +956,27 @@ namespace UD_Relic_Revealer.Mod
             return color;
         }
 
-        public string GetEraDisplayString()
+        public string GetEraColor()
+            => GetEraColor(Era)
+            ;
+
+        public string GetEraDisplayString(bool SkipInit = false)
         {
-            Init();
+            if (!SkipInit)
+                Init();
 
             string symbol = Era > 0
                 ? Era.OrdinalSuffix()
                 : " ? "
                 ;
 
-            return symbol.Colored(GetEraColor(Era));
+            return symbol.Colored(GetEraColor());
         }
 
-        public string GetStatus()
+        public string GetStatus(bool SkipInit = false)
         {
-            Init();
+            if (!SkipInit)
+                Init();
 
             string symbol = " ";
             string color = "K";
@@ -703,7 +1005,7 @@ namespace UD_Relic_Revealer.Mod
 
             if (ForReliquary > 0)
             {
-                symbol = LNES;
+                symbol = LINES;
                 color = !IsDestroyed ? "c" : "r";
             }
 
@@ -711,13 +1013,15 @@ namespace UD_Relic_Revealer.Mod
         }
 
         public static string OptionDisplayString(RelicRecord RelicRecord)
-            => Event.NewStringBuilder()
+        {
+            using var tB = TextBuilder.Get()
                 .Append("[").Append(RelicRecord?.GetStatus() ?? "{{C|?}}").Append("]")
                 .Append("[").AppendColored("", RelicRecord?.GetEraDisplayString() ?? "{{R|?}}").Append("]")
                 .Append("[Tier ").Append(RelicRecord?.Tier ?? 0).Append("] ")
-                .Append(RelicRecord.DisplayNameShort ?? "MISSING_RECORD")
-                .ToString()
-            ;
+                .Append(RelicRecord.DisplayNameShort ?? "MISSING_RECORD");
+
+            return tB.ToString();
+        }
 
         public string OptionDisplayString()
             => OptionDisplayString(this)
@@ -725,7 +1029,7 @@ namespace UD_Relic_Revealer.Mod
 
         public static string DebugString(RelicRecord RelicRecord)
         {
-            var sB = Event.NewStringBuilder()
+            using var tB = TextBuilder.Get()
                 .Append("[").Append(RelicRecord.BaseID).Append("] ").Append(RelicRecord.DisplayNameShort?.Strip() ?? "MISSING").Append("; ")
                 .AppendPair(nameof(RelicName), RelicRecord.RelicName ?? "NO_RELIC_NAME").Append("; ")
                 .AppendPair(nameof(ForReliquary), RelicRecord.ForReliquary).Append("; ")
@@ -736,11 +1040,118 @@ namespace UD_Relic_Revealer.Mod
                 .AppendPair(nameof(_Valid), RelicRecord._Valid).Append("; ")
                 .AppendPair(nameof(_Pinned), RelicRecord._Pinned);
 
-            return sB.ToString();
+            return tB.ToString();
         }
 
         public string DebugString()
             => DebugString(this)
+            ;
+
+        public string GetPageTitle()
+            => IsValidRecord
+                || IsPinned()
+            ? DisplayNameShort.Colored("W")
+            : null
+            ;
+
+        public string GetPageContents()
+        {
+            if (!IsValidRecord
+                && !IsPinned())
+                return null;
+
+            string sultanName = HistoryAPI.GetSultanForPeriod(Era)?.entity?.Name;
+  
+            using var pageBuilder = TextBuilder.Get();
+
+            bool isDescriptivePlural = DescriptiveNoun?.StartsWith("pair") is not true && IsPlural;
+            string isAre = isDescriptivePlural ? "are" : "is";
+
+            using var elementsList = ScopeDisposedList<string>.GetFromPool();
+            if (RelicElements.IsNullOrEmpty())
+                elementsList.Add("being quite mysterious");
+            else
+                elementsList.AddRange(RelicElements.Select(a => a.GetOneSpiceEntry()));
+
+            using var factionFeelingList = ScopeDisposedList<string>.GetFromPool();
+            if (RelicFactionFeelings.IsNullOrEmpty())
+                factionFeelingList.Add("keep largely to themself");
+            else
+                factionFeelingList.AddRange(RelicFactionFeelings.Select(f => (string)f));
+
+            string elementsAndList = Grammar.MakeAndList(elementsList);
+            string factionFeelingAndList = Grammar.MakeAndList(factionFeelingList);
+
+            bool doExtra = Type != null
+                && Type != "Book"
+                && Type != "Artifact"
+                && Type != "Food"
+                ;
+
+            pageBuilder
+                .Append(GetPageTitle())
+                .AppendLine()
+                .AppendLine().Append(IndicativeProximal).Append(" ").Append(IsPlural.GetPlural("relic")).Append(" ").Append(isAre).Append(" ")
+                    .Append((isDescriptivePlural || DescriptiveNoun?.Equals("armor") is true).GetPlural("a", "some")).Append(" tier ").Append(Tier)
+                    .Append(" ").Append(DescriptiveNoun).Append(", which ").Append(isDescriptivePlural.GetPlural("was", "were")).Append(" owned by ")
+                    .AppendColored(GetEraColor(), sultanName).Append(", the ").Append(GetEraDisplayString(SkipInit: true)).Append(" era sultan.");
+
+            if (doExtra)
+            {
+                pageBuilder
+                    .AppendLine()
+                    .AppendLine().AppendColored(GetEraColor(), sultanName).Append(" was known for ").Append(elementsAndList).Append(". Perhaps ")
+                        .Append(GetPageTitle()).Append(" was in some ways representitive of that.")
+                    .AppendLine()
+                    .AppendLine().Append("They were also known to ").Append(factionFeelingAndList).Append(", which is made evident by depictions of them with ")
+                        .Append(indicativeProximal).Append(" particular ").Append(IsPlural.GetPlural("relic")).Append(".");
+            }
+
+            if (!IsForReliquary)
+            {
+                pageBuilder
+                    .AppendLine()
+                    .AppendLine().Append(Pronouns.CapitalizedPossessiveAdjective).Append(" last known location is lost to the sands of time.");
+            }
+            else
+            {
+                pageBuilder
+                    .AppendLine()
+                    .AppendLine().Append("It is broadly understood that ").Append(Pronouns.Subjective).Append(" ").Append(IsPlural.GetPlural("has", "have")).Append(" been buried with ").Append(Pronouns.PossessiveAdjective).Append(" owner.");
+            }
+
+            pageBuilder
+                .AppendLine()
+                .AppendLine().AppendColored("k", "This is a WIP book that you probably shouldn't be able to find yet...");
+
+            pageBuilder
+                .AppendLine().AppendColored("W", "Debug")
+                .AppendLine().Append(nameof(Type)).Append(": ").Append(Type)
+                .AppendLine().Append(nameof(Subtype)).Append(": ").Append(SubtypeDisplay).Append(" (").Append(Subtype).Append(")");
+
+            if (doExtra)
+            {
+                string relicElementsDebug = RelicElements.Aggregate((string)null, (a, n) => a + (!a.IsNullOrEmpty() ? ", " : null) + n.GetElement(Colored: true)) ?? "none";
+                string relicFeelingsDebug = RelicFactionFeelings.Aggregate((string)null, (a, n) => a + (!a.IsNullOrEmpty() ? ", " : null) + n.DebugString()) ?? "none";
+
+                pageBuilder
+                    .AppendLine().Append(nameof(RelicElements)).Append(": ").Append(relicElementsDebug)
+                    .AppendLine().Append(nameof(RelicFactionFeelings)).Append(": ").Append(relicFeelingsDebug);
+            }
+
+            return pageBuilder.ToString();
+        }
+
+        public IBookContents.BookPageInfo GetBookPageInfo()
+            => IsValidRecord
+            ? BookPageInfo ??= new IBookContents.BookPageInfo
+            {
+                Title = UD_RelicTrackerBook.Title,
+                Text = GetPageContents(),
+                Format = "Auto",
+                Margins = "1,2,2,2",
+            }
+            : null
             ;
 
         public async Task<UIUtils.CascadableResult> ViewRelicAsync(bool Internals = false)
@@ -755,16 +1166,13 @@ namespace UD_Relic_Revealer.Mod
 
             using var tBDesc = TextBuilder.Get(Description);
             using var elements = ScopeDisposedList<StringPair>.GetFromPool();
+
             if (IsClaimed)
-            {
                 elements.Add(new("have", "been {{G|claimed by you}}"));
-            }
 
             if (IsCached
                 && !IsExitingCache)
-            {
                 elements.Add(new(null, "currently cached".Colored("C")));
-            }
 
             if (ForReliquary > 0)
             {
@@ -774,9 +1182,7 @@ namespace UD_Relic_Revealer.Mod
             {
                 if (!currentlyPlayerHeld
                     && IsInCurrentZone)
-                {
                     elements.Add(new(null, "somewhere {{W|in this zone}}"));
-                }
 
                 if (!LastHeldBy.IsNullOrEmpty())
                 {
@@ -839,8 +1245,6 @@ namespace UD_Relic_Revealer.Mod
 
             using var tBName = TextBuilder.Get()
                 .Append(DisplayName)
-                // .AppendLine()
-                // .AppendColored("C", $": Tier {Tier} :")
                 ;
 
             var buttons = new List<QudMenuItem>(PopupMessage.SingleButton);
@@ -877,6 +1281,7 @@ namespace UD_Relic_Revealer.Mod
             yield return $"{nameof(_DisplayName)}: {_DisplayName ?? "null"}";
             yield return $"{nameof(_RelicName)}: {_RelicName ?? "null"}";
             yield return $"{nameof(_Pronouns)}: {_Pronouns ?? "null"}";
+            yield return $"{nameof(_DescriptiveNoun)}: {_DescriptiveNoun ?? "null"}";
             yield return $"{nameof(IsPlural)}: {IsPlural}";
             yield return $"{nameof(IndicativeProximal)}: {IndicativeProximal}";
             yield return $"{nameof(it)}: {it ?? "null"}";
@@ -902,6 +1307,15 @@ namespace UD_Relic_Revealer.Mod
             yield return $"{nameof(_Pinned)}: {_Pinned}";
             yield return $"{nameof(_Synched)}: {_Synched}";
 
+            yield return $"{nameof(BookPageInfo)}: {(BookPageInfo == null ? "null" : null)}";
+            if (BookPageInfo != null)
+            {
+                yield return $"{1.Indent()}{nameof(BookPageInfo.Title)}: {BookPageInfo.Title ?? "null"}";
+                yield return $"{1.Indent()}{nameof(BookPageInfo.Format)}: {BookPageInfo.Format ?? "null"}";
+                yield return $"{1.Indent()}{nameof(BookPageInfo.Margins)}: {BookPageInfo.Margins ?? "null"}";
+                yield return $"{1.Indent()}{nameof(BookPageInfo.Text)}: {BookPageInfo.Text ?? "null"}";
+            }
+
             if (!FieldsOnly)
             {
                 yield return $"{nameof(IsInCurrentZone)}: {IsInCurrentZone}";
@@ -919,24 +1333,32 @@ namespace UD_Relic_Revealer.Mod
 
                 Relic = null;
                 TrackerID = Guid.Empty;
+
                 _Tier = null;
                 _Era = null;
+
                 _DisplayName = null;
                 _DisplayNameShort = null;
                 _RelicName = null;
                 _Pronouns = null;
+                _DescriptiveNoun = null;
+
                 _Render = null;
                 _Description = null;
                 _Story = null;
+
                 _LastHeldBy = null;
                 _LastHeldByPlayer = false;
                 _ForReliquary = 0;
+
                 _IsMask = null;
                 _IsClaimed = false;
                 _IsDestroyed = false;
                 _Valid = false;
                 _Pinned = false;
                 _Synched = false;
+
+                BookPageInfo = null;
             }
             catch (Exception x)
             {

@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<books>
+  <book ID="UD_Relic_Revealer_RelicTrackerBook_Templates" Title="Relics of Sultans Past">
+    <page>=displayName=
+
+      =IndicativeProximal= =relic.getPlural:relic= =isAre= =noun.getPlural:a:some= tier =Tier= =noun=, which =noun.getPlural:was:were= owned by {{=eraColor=|=sultanName=}}, the =eraDisplayString= era sultan.
+      
+      
+      
+      =locationText=</page>
+    <page>=displayName=
+
+      =IndicativeProximal= =relic.getPlural:relic= =isAre= =noun.getPlural:a:some= tier =Tier= =noun=, which =noun.getPlural:was:were= owned by {{=eraColor=|=sultanName=}}, the =eraDisplayString= era sultan.
+      
+      =locationText=</page>
+  </book>
+</books>

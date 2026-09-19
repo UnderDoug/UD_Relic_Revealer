@@ -4,6 +4,8 @@ using System;
 
 using HistoryKit;
 using XRL.World;
+using System.Linq;
+using XRL.World.Parts;
 
 namespace UD_Relic_Revealer.Mod.Harmony
 {
@@ -75,16 +77,43 @@ namespace UD_Relic_Revealer.Mod.Harmony
                 ArgumentType.Normal,
             })]
         [HarmonyPostfix]
-        public static void GenerateRelic_AddPeriod_Postfix(
+        public static void GenerateRelic_AddPops_Postfix(
             ref GameObject __result,
             HistoricEntitySnapshot Snapshot
             )
         {
-            __result?.SetStringProperty(RelicRecord.RelicEraProp, Snapshot.GetProperty("period"));
+            string itemType = Snapshot.GetProperty("itemType");
+            if (itemType == "unknown")
+            {
+                if (__result?.GetStringProperty(RelicRecord.RelicTypeProp) is string type)
+                    itemType = RelicGenerator.TypeMap.Where(e => e.Value == type).Select(e => e.Key).GetRandomElementCosmetic();
+
+                if (itemType == "hammers")
+                    itemType = "hammer";
+
+                if (itemType == "boot"
+                    || itemType == "glove")
+                    itemType += "s";
+            }
+
+            string periodString = Snapshot.GetProperty("period");
+
+            if (__result.TryGetPart(out UD_RelicData relicData))
+            {
+                if (int.TryParse(periodString, out int period))
+                    relicData.Period = period;
+
+                relicData.ItemType = itemType;
+            }
+
+            __result?.SetStringProperty(RelicRecord.RelicEraProp, periodString);
+            __result?.SetStringProperty(RelicRecord.RelicItemTypeProp, itemType);
         }
 
         /// <summary>
-        /// Postfix patch of <see cref="RelicGenerator.GenerateBaseRelic(string, int, bool)"/> to adjust the "Level" <see cref="Statistic"/> of the resultant relic, provided its <paramref name="Type"/> is "Book", to be <paramref name="Tier"/> * 5, with the goal being to make the book relic's tier match the intended one.
+        /// Postfix patch of <see cref="RelicGenerator.GenerateBaseRelic(string, int, bool)"/> to adjust the "Level" <see cref="Statistic"/> of the resultant relic, provided its <paramref name="Type"/> is "Book", to be <paramref name="Tier"/> * 5, with the goal being to make the book relic's tier match the intended one.<br/>
+        /// <br/>
+        /// Also used to add the final string Type as a string property of the relic.
         /// </summary>
         /// <param name="__result">Original return value</param>
         /// <param name="Type">Original argument</param>
@@ -111,9 +140,16 @@ namespace UD_Relic_Revealer.Mod.Harmony
             int Tier
             )
         {
-            if (Type == "Book"
-                && __result?.GetStat("Level") is Statistic level)
-                level.BaseValue = Tier * 5;
+            var relicData = new UD_RelicData
+            {
+                Type = Type,
+                Tier = Tier,
+            };
+
+            __result.RemovePart<UD_RelicData>();
+            __result.AddPart(relicData);
+
+            __result?.SetStringProperty(RelicRecord.RelicTypeProp, Type, RemoveIfNull: true);
         }
     }
 }

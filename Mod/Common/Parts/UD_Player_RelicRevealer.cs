@@ -134,12 +134,13 @@ namespace XRL.World.Parts
 
         public override bool HandleEvent(BeforeTakeActionEvent E)
         {
-            if (Options.EnableReshowOnGameLoad
-                && RelicTrackerSystem.Instance is RelicTrackerSystem relicTrackerSystem)
+            if (RelicTrackerSystem.Instance is RelicTrackerSystem relicTrackerSystem)
             {
                 HasShown = true;
                 relicTrackerSystem.HasShown = true;
-                relicTrackerSystem.AskRevealWhat();
+
+                if (Options.EnableReshowOnGameLoad)
+                    relicTrackerSystem.AskRevealWhat();
             }
             return base.HandleEvent(E);
         }

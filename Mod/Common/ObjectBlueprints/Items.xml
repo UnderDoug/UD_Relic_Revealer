@@ -4,4 +4,12 @@
     <removetag Name="Tier" />
     <stat Name="Level" ShortName="LV" Min="1" Max="10000" Value="1" />
   </object>
+
+  <object Name="UD_Relic_Revealer_RelicTrackerBook" Inherits="Book">
+    <part Name="Render" DisplayName="{{W|Relics of Sultans Past}}" ColorString="&amp;w" RenderString="=" RenderLayer="5" Tile="Items/sw_book_1.bmp" DetailColor="M" />
+    <!--part Name="Book" ID="UD_Relic_Revealer_RelicTrackerBook" /-->
+    <part Name="Book" ID="@UD_RelicTrackerBook" />
+    <part Name="Commerce" Value="150" />
+    <tag Name="ExcludeFromDynamicEncounters" value="*noinherit" />
+  </object>
 </objects>

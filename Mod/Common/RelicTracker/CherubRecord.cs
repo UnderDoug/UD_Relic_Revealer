@@ -148,7 +148,7 @@ namespace UD_Relic_Revealer.Mod
             }
             ;
 
-        public static string GetElementColor(string Element)
+        public static string GetElementColor(string Element, string InvalidColor = "R")
             => Element switch
             {
                 "glass" => "K",
@@ -162,7 +162,7 @@ namespace UD_Relic_Revealer.Mod
                 "chance" => "m",
                 "circuitry" => "W",
                 "travel" => "g",
-                _ => "R",
+                _ => InvalidColor,
             }
             ;
 

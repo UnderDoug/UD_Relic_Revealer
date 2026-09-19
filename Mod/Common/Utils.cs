@@ -2,9 +2,12 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 
 using ConsoleLib.Console;
+
+using HarmonyLib;
 
 using Qud.UI;
 
@@ -35,7 +38,7 @@ namespace UD_Relic_Revealer.Mod
         public const string TICK = "\u221A";  // √
         public const string CROSS = "\u0058"; // X
         public const string SQUR = "\xfe"; // ■
-        public const string LNES = "\xf0"; // ≡
+        public const string LINES = "\xf0"; // ≡
         public const string CIRC = "\x09"; // ○
 
         public const string BULLET = "\u0007"; // •
@@ -390,9 +393,57 @@ namespace UD_Relic_Revealer.Mod
             })
             ;
 
+        public static bool TryGetFieldNaughty<V>(Type Type, string Field, out V Value)
+        {
+            Value = default;
+            var valueType = typeof(V);
+            try
+            {
+                if (Field.IsNullOrEmpty())
+                    throw new ArgumentException(nameof(Field), "Cannot be null or empty string");
+
+                var field = Type.GetField(Field, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                    ?? throw new ArgumentOutOfRangeException(nameof(Field), $"Field \"{Field}\" was not found in {nameof(Type)} {Type}");
+
+                if (!field.FieldType.IsAssignableFrom(valueType))
+                    throw new InvalidCastException($"{Field} field in {nameof(Type)} {Type} is {field.FieldType}, to which {valueType} cannot be cast");
+
+                Value = (V)field.GetValue(null);
+                Info($"{nameof(TryGetFieldNaughty)}({nameof(Type)}: {Type}, {nameof(Field)}: {Field}, out {valueType})");
+                return true;
+            }
+            catch (ArgumentOutOfRangeException x)
+            {
+                Error(nameof(TryGetFieldNaughty), x);
+                return default;
+            }
+            catch (InvalidCastException x)
+            {
+                Error(nameof(TryGetFieldNaughty), x);
+                return default;
+            }
+        }
+
+        public static void LogTranspilationError(
+            string PatchMethodName,
+            int Pos,
+            int MetricsCheckSteps,
+            string CodeMatchMethod,
+            string CodeMatchesName,
+            int Indent = 0,
+            params CodeMatch[] CodeMatches
+            )
+        {
+            Error($"{PatchMethodName}: ({MetricsCheckSteps}) {CodeMatchMethod} failed to find instructions {CodeMatchesName}");
+            int posPadding = Math.Max(4, ((CodeMatches?.Length ?? 1) + 1).ToString().Length);
+            int pos = Pos;
+            foreach (var match in CodeMatches)
+                match.Vomit(pos++, posPadding, Indent: Indent, Do: true);
+        }
+
         #region Wishes
 
-        
+
 
         #endregion
     }

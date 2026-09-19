@@ -17,6 +17,14 @@ using XRL.World.Text.Attributes;
 using ReplacerContext = XRL.World.Text.Delegates.DelegateContext;
 
 using UD_Relic_Revealer.Mod.UI;
+using System.Reflection;
+using HarmonyLib;
+using System.Reflection.Emit;
+using System.IO;
+using System.Runtime.Serialization.Formatters.Binary;
+using System.Runtime.Serialization.Formatters;
+using System.Runtime.InteropServices;
+using XRL.Rules;
 
 namespace UD_Relic_Revealer.Mod
 {
@@ -206,6 +214,14 @@ namespace UD_Relic_Revealer.Mod
 
         public static StringBuilder AppendPair<TKey, TValue>(this StringBuilder SB, KeyValuePair<TKey, TValue> KVP)
             => SB.AppendPair(KVP.Key, KVP.Value)
+            ;
+
+        public static TextBuilder AppendPair<TKey, TValue>(this TextBuilder TB, TKey Key, TValue Value)
+            => TB.Append(Key).Append(": ").Append(Value)
+            ;
+
+        public static TextBuilder AppendPair<TKey, TValue>(this TextBuilder TB, KeyValuePair<TKey, TValue> KVP)
+            => TB.AppendPair(KVP.Key, KVP.Value)
             ;
 
         public static string Colored(this string Text, string Color)
@@ -540,5 +556,500 @@ namespace UD_Relic_Revealer.Mod
             ? Plural ?? Singular.Pluralize()
             : Singular
             ;
+
+        public static V SetFieldNaughty<T, V>(this T Object, string Field, V Value)
+        {
+            var type = typeof(T);
+            var valueType = typeof(V);
+            try
+            {
+                if (Field.IsNullOrEmpty())
+                    throw new ArgumentException(nameof(Field), "Cannot be null or empty string");
+
+                var field = type.GetField(Field, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
+                    ?? throw new ArgumentOutOfRangeException(nameof(Field), $"Field \"{Field}\" was not found in {nameof(Type)} {type}");
+
+                if (!field.FieldType.IsAssignableFrom(valueType))
+                    throw new InvalidCastException($"{Field} field in {nameof(Type)} {type} is {field.FieldType}, to which {valueType} cannot be cast");
+
+                field.SetValue(Object, Value);
+                if (field.GetValue(Object) is V value)
+                    Utils.Info($"{type}.{nameof(SetFieldNaughty)}({nameof(Field)}: {Field})");
+
+                return Value;
+            }
+            catch (ArgumentOutOfRangeException x)
+            {
+                Utils.Error(nameof(SetFieldNaughty), x);
+                return default;
+            }
+            catch (InvalidCastException x)
+            {
+                Utils.Error(nameof(SetFieldNaughty), x);
+                return default;
+            }
+        }
+
+        public static bool TryGetFieldNaughty<T, V>(this T Object, string Field, out V Value)
+        {
+            Value = default;
+            var type = typeof(T);
+            var valueType = typeof(V);
+            try
+            {
+                if (Field.IsNullOrEmpty())
+                    throw new ArgumentException(nameof(Field), "Cannot be null or empty string");
+
+                var field = type.GetField(Field, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
+                    ?? throw new ArgumentOutOfRangeException(nameof(Field), $"Field \"{Field}\" was not found in {nameof(Type)} {type}");
+
+                if (!field.FieldType.IsAssignableFrom(valueType))
+                    throw new InvalidCastException($"{Field} field in {nameof(Type)} {type} is {field.FieldType}, to which {valueType} cannot be cast");
+
+                Value = (V)field.GetValue(Object);
+                Utils.Info($"{type}.{nameof(TryGetFieldNaughty)}({nameof(Field)}: {Field}, out {valueType})");
+                return true;
+            }
+            catch (ArgumentOutOfRangeException x)
+            {
+                Utils.Error(nameof(TryGetFieldNaughty), x);
+                return default;
+            }
+            catch (InvalidCastException x)
+            {
+                Utils.Error(nameof(TryGetFieldNaughty), x);
+                return default;
+            }
+        }
+
+        public static string ToLiteral(this string String, bool Quotes = false)
+        {
+            if (String.IsNullOrEmpty())
+                return null;
+
+            string output = Microsoft.CodeAnalysis.CSharp.SymbolDisplay.FormatLiteral(String, false);
+
+            if (Quotes)
+                output = $"\"{output}\"";
+
+            return output;
+        }
+
+        public static string CorruptText(this string Text)
+        {
+            if (Text.IsNullOrEmpty())
+                return Text;
+
+            Text = Text.Strip();
+
+            using var corruptions = ScopeDisposedList<string>.GetFromPool();
+            while (corruptions.IsNullOrEmpty()
+                || corruptions.Aggregate(0, (a, n) => a + n.Length) <= Text.Length)
+            {
+                string corruption = TextFilters.GenerateCrypticWord();
+                if (corruption.Length < 8)
+                    corruptions.Add(corruption);
+            }
+
+            int corruptionsLength = corruptions.Aggregate(0, (a, n) => a + n.Length);
+            int diff = corruptionsLength - Text.Length;
+            int startDiff = (int)Math.Ceiling(diff / 2.0);
+            int endDiff = (int)Math.Floor(diff / 2.0);
+
+            int startAt = 0;
+            if (corruptions.Aggregate(0, (a, n) => a + n.Length) > Text.Length)
+                startAt = Stat.RandomCosmetic(0, diff);
+
+            string firstCorruption = null;
+            if (startDiff > 0)
+                firstCorruption = corruptions.TakeAt(0);
+
+            string lastCorruption = null;
+            if (endDiff > 0
+                && corruptions.Count > 0)
+                lastCorruption = corruptions.TakeAt(corruptions.Count - 1);
+
+            if (!firstCorruption.IsNullOrEmpty()
+                && startDiff > 0
+                && startDiff < firstCorruption.Length)
+                corruptions.Insert(0, firstCorruption[startDiff..]);
+
+            if (!lastCorruption.IsNullOrEmpty()
+                && endDiff > 0
+                && endDiff < lastCorruption.Length)
+                corruptions.Add(lastCorruption[endDiff..]);
+
+            corruptionsLength = corruptions.Aggregate(0, (a, n) => a + n.Length);
+
+            int originalStart = startAt;
+            int moduloOffset = Stat.RandomCosmetic(0, 6999);
+
+            using var descriptions = ScopeDisposedList<string>.GetFromPool();
+            int startPos = 0;
+            foreach (string corruption in corruptions)
+            {
+                int endPos = Math.Min(startPos + corruption.Length, Text.Length);
+
+                if (startPos < endPos)
+                    descriptions.Add(Text[startPos..endPos]);
+
+                startPos = endPos;
+            }
+
+            int modOffset = Stat.RandomCosmetic(0, 6999);
+
+            string text = descriptions.Count.Aggregate(
+                seed: "",
+                func: delegate (string text, int i)
+                {
+                    string next = ((i + moduloOffset) % 2 == 0)
+                        ? descriptions[i]
+                        : corruptions[i];
+                    return text + next;
+                });
+
+            using var fragments = ScopeDisposedList<string>.GetFromPool();
+            int colorOffset = Stat.RandomCosmetic(1, 3);
+            if (50.in100())
+                colorOffset *= -1;
+
+            startPos = 0;
+            for (int i = 0; i < descriptions.Count; i++)
+            {
+                if (descriptions[i] is string description)
+                {
+                    if (i > 0)
+                        startPos = Math.Clamp(startPos, 0, Text.Length);
+
+                    int endPos = Math.Clamp(startPos + description.Length + colorOffset, 0, Text.Length);
+
+                    if (startPos < endPos)
+                        fragments.Add(text[startPos..endPos]);
+
+                    if (i == descriptions.Count - 1
+                        && endPos < Text.Length)
+                        fragments.Add(text[endPos..]);
+
+                    startPos = endPos;
+                }
+            }
+
+            var colorBag = new BallBag<string>
+            {
+                { "k", 10 },
+                { "K", 50 },
+                { "C", 100 },
+                { "c", 100 },
+                { "Y", 50 },
+            };
+
+            text = fragments.Count.Aggregate(
+                seed: "",
+                func: delegate (string text, int i)
+                {
+                    int index = (int)Math.Floor(i / 2.0);
+                    if ((i + moduloOffset) % 2 == 0)
+                        return text + fragments[i];
+                    return text + fragments[i].Color(colorBag.PeekOne());
+                });
+
+            return text;
+        }
+
+        #region Transpilation
+
+        public static bool IsEndOfSection(this OpCode OpCode)
+            => OpCode.ToString() is not string opCodeString
+            || opCodeString.StartsWith("pop")
+            || opCodeString.StartsWith("br")
+            || opCodeString.StartsWith("be")
+            || opCodeString.StartsWith("bg")
+            || opCodeString.StartsWith("bl")
+            || opCodeString.StartsWith("leave")
+            || opCodeString.StartsWith("ret")
+            || opCodeString.StartsWith("st")
+            || opCodeString.StartsWith("throw")
+            || opCodeString.StartsWith("endfinally")
+            ;
+
+        public static LocalBuilder GetLocalBuilderAtIndex(this MethodBase MethodBase, int Index)
+            => MethodBase.GetMethodBody().LocalVariables[Index] as LocalBuilder
+            ;
+
+        public static CodeInstruction Vomit(
+            this CodeInstruction Instruction,
+            int Pos,
+            int PosPadding,
+            Dictionary<Label, int> LabelInstructions = null,
+            List<int> Offsets = null,
+            bool HaveILGen = false,
+            bool IncludeEnd = false,
+            bool Do = false
+            )
+        {
+            if (!Do)
+                return Instruction;
+
+            string operandString = Instruction?.operand?.VomitOperand(PosPadding, LabelInstructions, Offsets, HaveILGen, Do);
+
+            int loc = !Offsets.IsNullOrEmpty() ? Offsets[Pos] : Pos;
+            string labelString = $"[{Pos.ToString().PadLeft(PosPadding, '0')}]";
+            if (HaveILGen)
+                labelString = $"IL_{loc:X4}";
+
+
+            Utils.Log($"{labelString} {Instruction.opcode,-10} {operandString}");
+            if (IncludeEnd
+                && Instruction.opcode.IsEndOfSection())
+                Utils.Log("");
+
+            return Instruction;
+        }
+
+        public static CodeMatch Vomit(
+            this CodeMatch CodeMatch,
+            int Pos,
+            int PosPadding,
+            Dictionary<Label, int> LabelInstructions = null,
+            List<int> Offsets = null,
+            bool HaveILGen = false,
+            bool IncludeEnd = false,
+            int Indent = 0,
+            bool Do = false
+            )
+        {
+            if (!Do)
+                return CodeMatch;
+
+            string operandString = CodeMatch?.operand?.VomitOperand(PosPadding, LabelInstructions, Offsets, HaveILGen, Do);
+            string labelString = $"[{Pos.ToString().PadLeft(PosPadding, '0')}]";
+            if (HaveILGen)
+                labelString = $"IL_{Pos:X4}:";
+
+            Utils.Log($"{Indent.Indent()}{labelString} {CodeMatch.opcode,-10} {operandString}");
+            if (IncludeEnd
+                && CodeMatch.opcode.IsEndOfSection())
+                Utils.Log("");
+
+            return CodeMatch;
+        }
+
+        public static CodeMatch[] Vomit(
+            this CodeMatch[] CodeMatchs,
+            string Context = null,
+            string EndContext = null,
+            Dictionary<Label, int> LabelInstructions = null,
+            bool HaveILGen = false,
+            bool IncludeEnd = false,
+            bool Do = false
+            )
+        {
+            if (!Do)
+                return CodeMatchs;
+
+            int num = 0;
+            int posPadding = Math.Max(4, (CodeMatchs.Length + 1).ToString().Length);
+            if (!Context.IsNullOrEmpty())
+                Utils.Log(Context);
+
+            for (int i = 0; i < CodeMatchs.Length; i++)
+                CodeMatchs[i].Vomit(
+                    IncludeEnd: num < CodeMatchs.Length - 1 && IncludeEnd,
+                    Pos: num++,
+                    PosPadding: posPadding,
+                    LabelInstructions: LabelInstructions,
+                    HaveILGen: HaveILGen,
+                    Do: Do);
+
+            if (!EndContext.IsNullOrEmpty())
+                Utils.Log(EndContext);
+
+            return CodeMatchs;
+        }
+
+        public static CodeInstruction[] Vomit(
+            this CodeInstruction[] CodeInstructions,
+            string Context = null,
+            string EndContext = null,
+            Dictionary<Label, int> LabelInstructions = null,
+            bool HaveILGen = false,
+            bool IncludeEnd = false,
+            bool Do = false
+            )
+        {
+            if (!Do)
+                return CodeInstructions;
+
+            int num = 0;
+            int posPadding = Math.Max(4, (CodeInstructions.Length + 1).ToString().Length);
+            if (!Context.IsNullOrEmpty())
+                Utils.Log(Context);
+
+            for (int i = 0; i < CodeInstructions.Length; i++)
+                CodeInstructions[i].Vomit(
+                    IncludeEnd: num < CodeInstructions.Length - 1 && IncludeEnd,
+                    Pos: num++,
+                    PosPadding: posPadding,
+                    LabelInstructions: LabelInstructions,
+                    HaveILGen: HaveILGen,
+                    Do: Do);
+
+            if (!EndContext.IsNullOrEmpty())
+                Utils.Log(EndContext);
+
+            return CodeInstructions;
+        }
+
+        public static string VomitOperand(
+            this object Operand,
+            int PosPadding,
+            Dictionary<Label, int> LabelInstructions = null,
+            List<int> Offsets = null,
+            bool HaveILGen = false,
+            bool Do = false
+            )
+        {
+            if (!Do)
+                return null;
+
+            string result = Operand?.ToString();
+            if (Operand?.GetType() == typeof(string))
+                result = Operand?.ToString()?.ToLiteral(Quotes: true);
+            else
+            if (Operand is MethodInfo methodOp)
+                result = $"{(methodOp.ReturnType.IsValueType ? "null" : "class ")}{methodOp.ReturnType} {methodOp.DeclaringType}:{methodOp.Name}({methodOp.GetParameters().Select(p => $"{(p.ParameterType.IsValueType ? "null" : "class ")}{p.ParameterType}").Aggregate((string)null, Utils.CommaSpaceDelimitedAggregator)})";
+            else
+            if (Operand is FieldInfo fieldOp)
+                result = $"{(fieldOp.FieldType.IsValueType ? "null" : "class ")}{fieldOp.FieldType} {fieldOp.DeclaringType}:{fieldOp.Name}";
+            else
+            if (Operand is PropertyInfo propertyOp)
+                result = $"{(propertyOp.PropertyType.IsValueType ? "null" : "class ")}{propertyOp.PropertyType} {propertyOp.DeclaringType}:{propertyOp.Name}";
+            else
+            if (Operand is Label key)
+            {
+                result = "[????]";
+                if (!LabelInstructions.IsNullOrEmpty()
+                    && LabelInstructions.ContainsKey(key))
+                {
+                    int labelPos = LabelInstructions[key];
+                    int loc = !Offsets.IsNullOrEmpty() ? Offsets[labelPos] : labelPos;
+                    result = $"[{LabelInstructions[key].ToString().PadLeft(PosPadding, '0')}]";
+                    if (HaveILGen)
+                        result = $"IL_{labelPos:X4}";
+                }
+            }
+
+            return result;
+        }
+
+        public static CodeMatcher Vomit(
+            this CodeMatcher CodeMatcher,
+            ILGenerator Generator,
+            bool Do = false,
+            int? From = null,
+            int? To = null
+            )
+        {
+            if (Do)
+            {
+                bool haveGenerator = false; // Generator != null;
+                var positionsByLabel = new Dictionary<Label, int>();
+                int pos = CodeMatcher.Pos;
+
+                var offsets = new List<int>();
+                int offset = 0;
+
+                CodeMatcher.Start();
+                do
+                {
+                    var instruction = CodeMatcher.Instruction;
+
+                    /*offset += instruction.opcode.Size;
+                    if (instruction.operand != null)
+                        offset += Marshal.SizeOf(instruction.operand);
+                    offsets.Add(offset);*/
+
+                    if (instruction.labels.IsNullOrEmpty())
+                        continue;
+
+                    foreach (var label in instruction.labels)
+                        positionsByLabel[label] = CodeMatcher.Pos;
+                }
+                while (CodeMatcher.Advance(1).IsValid);
+
+                int posPadding = Math.Max(4, (CodeMatcher.Instructions().Count + 1).ToString().Length);
+                int from = From ?? 0;
+                int to = To ?? CodeMatcher.Length - 1;
+                CodeMatcher.Start();
+                do
+                {
+                    if (CodeMatcher.Pos < from)
+                        continue;
+                    if (CodeMatcher.Pos > to)
+                        break;
+
+                    CodeMatcher.Instruction?.Vomit(CodeMatcher.Pos, posPadding, positionsByLabel, offsets, haveGenerator || !offsets.IsNullOrEmpty(), IncludeEnd: true, Do);
+                }
+                while (CodeMatcher.Advance(1).IsValid);
+
+                CodeMatcher.Start().Advance(pos);
+            }
+
+            return CodeMatcher;
+        }
+
+        public static CodeMatcher Vomit(
+            this CodeMatcher CodeMatcher,
+            bool Do,
+            int? From,
+            int? To
+            )
+            => CodeMatcher.Vomit(
+                Generator: null,
+                Do: Do,
+                From: From,
+                To: To)
+            ;
+
+        public static CodeMatcher Vomit(
+            this CodeMatcher CodeMatcher,
+            ILGenerator Generator,
+            bool Do,
+            int PosMargin
+            )
+            => CodeMatcher.Vomit(
+                Generator: Generator,
+                Do: Do,
+                From: PosMargin >= 0 ? Math.Max(0, (CodeMatcher?.Pos ?? 0) - PosMargin) : null,
+                To: PosMargin >= 0 ? Math.Min((CodeMatcher?.Pos ?? 0) + PosMargin, (CodeMatcher?.Length ?? 1) - 1) : null)
+            ;
+
+        public static CodeMatcher Vomit(
+            this CodeMatcher CodeMatcher,
+            bool Do = false,
+            int PosMargin = -1
+            )
+            => CodeMatcher.Vomit(
+                Generator: null,
+                Do: Do,
+                PosMargin: PosMargin)
+            ;
+
+        public static CodeMatcher Vomit(
+            this CodeMatcher CodeMatcher,
+            bool Do = false
+            )
+            => CodeMatcher.Vomit(
+                Generator: null,
+                Do: Do,
+                From: null,
+                To: null)
+            ;
+
+        public static IEnumerable<CodeInstruction> Vomit(this IEnumerable<CodeInstruction> Instructions, bool Do = false)
+            => new CodeMatcher(Instructions).Vomit(Do).InstructionEnumeration()
+            ;
+
+        #endregion
     }
 }

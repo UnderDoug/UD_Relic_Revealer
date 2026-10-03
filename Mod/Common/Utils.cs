@@ -438,7 +438,11 @@ namespace UD_Relic_Revealer.Mod
             int posPadding = Math.Max(4, ((CodeMatches?.Length ?? 1) + 1).ToString().Length);
             int pos = Pos;
             foreach (var match in CodeMatches)
-                match.Vomit(pos++, posPadding, Indent: Indent, Do: true);
+                match.Vomit(
+                    Pos: pos++,
+                    PosPadding: posPadding,
+                    Indent: Indent,
+                    Do: true);
         }
 
         #region Wishes

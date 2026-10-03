@@ -1,4 +1,4 @@
-﻿using HarmonyLib;
+﻿/*using HarmonyLib;
 
 using System;
 using System.Collections.Generic;
@@ -12,6 +12,7 @@ using XRL;
 
 namespace UD_Relic_Revealer.Mod.Harmony
 {
+    // No longer needed, kept for reference.
     [HarmonyPatch(typeof(BookUI))]
     public static class BookUI_Patches
     {
@@ -31,7 +32,7 @@ namespace UD_Relic_Revealer.Mod.Harmony
         {
             string patchMethodName = $"{nameof(BookUI_Patches)}.{nameof(BookUI.RenderDynamicBook)}";
 
-            CodeMatcher codeMatcher = new(Instructions, Generator);
+            var codeMatcher = new CodeMatcher(Instructions, Generator);
 
             int metricsCheckSteps = 0;
 
@@ -119,7 +120,7 @@ namespace UD_Relic_Revealer.Mod.Harmony
             inst_BookInfo_Title_type_GetTitle_obj.AddRange(inst_Invoke_GetTitle_obj);
             inst_BookInfo_Title_type_GetTitle_obj.AddRange(inst_CastString_AssignTitle);
 
-            codeMatcher/*.Advance(1)*/.InsertAndAdvance(inst_BookInfo_Title_type_GetTitle_obj);
+            codeMatcher.InsertAndAdvance(inst_BookInfo_Title_type_GetTitle_obj);
 
             if (DoVomit)
                 Utils.Info($"{patchMethodName}, inserted {nameof(inst_BookInfo_Title_type_GetTitle_obj)}");
@@ -128,6 +129,8 @@ namespace UD_Relic_Revealer.Mod.Harmony
 
             // success??
 
+            if (DoVomit)
+                Utils.Info($"{patchMethodName}, patched...");
             return codeMatcher.Vomit(Generator, DoVomit).InstructionEnumeration();
         }
 
@@ -151,4 +154,4 @@ namespace UD_Relic_Revealer.Mod.Harmony
             return null;
         }
     }
-}
+}*/
